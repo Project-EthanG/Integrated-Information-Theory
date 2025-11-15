@@ -109,10 +109,6 @@ def partition_pr_prior(Xt_past_prior, subset):
     n_nodes = int(np.log2(len(Xt_past_prior))) # cast as int since it is coming from np
     print("n_nodes", n_nodes)
 
-    # We need only the priors for where the state i is found (in a 1 node example,
-    # there are 2 states, so for state 0 we need every prior where A=0 to sum)
-    # We can do this with a dict to update where the keys hold that value
-
     all_states = all_binary_states(n_nodes)
     subset_states = all_binary_states(n_partition_states)
 
@@ -133,7 +129,8 @@ def partition_pr_prior(Xt_past_prior, subset):
     return list(prior_probs.values())
 
 
-# Compute marginal present probabilities in a similar manner
+# Compute marginal present probabilities in a similar manner to the prior for the
+# partition
 def partition_pr(Xt_pr, subset):
     n_nodes = int(np.log2(len(Xt_pr)))
     n_partition_states = len(subset)
@@ -343,10 +340,29 @@ prior = uniform_prior(tpm)
 
 # Compute the integrated information and corresponding intermediary quantities
 case1 = integrated_information(tpm, prior)
-
+'''
 print("\nIntegrated information: ", case1[0], "\n",
           "Mutual information across the network: ", case1[1], "\n",
           "Least Damaging Partition: ", case1[2], "\n",
           "Minimum Mutual Information across partitions", case1[3])
+'''
+# CASE 2: Similar to case 1 but non-deterministic by splitting symmetrically vertically
+# State-by-state TPM. Still use uniform prior
+tpm = np.array([[0.5,0,0,0,0,0,0,0.5],
+                [0,0,0,0.5,0.5,0,0,0],
+                [0,0.5,0,0,0,0,0.5,0],
+                [0,0,0.5,0,0,0.5,0,0],
+                [0,0,0.5,0,0,0.5,0,0],
+                [0,0.5,0,0,0,0,0.5,0],
+                [0,0,0,0.5,0.5,0,0,0],
+                [0.5,0,0,0,0,0,0,0.5]])
+prior = uniform_prior(tpm)
 
+case2 = integrated_information(tpm, prior)
+print("\nIntegrated information: ", case2[0], "\n",
+          "Mutual information across the network: ", case2[1], "\n",
+          "Least Damaging Partition: ", case2[2], "\n",
+          "Minimum Mutual Information across partitions", case2[3])
 
+# Notice that the network is fully integrated in this case; seems to be as a result
+# of the "predictability" of the noise since everything is symmetric.
