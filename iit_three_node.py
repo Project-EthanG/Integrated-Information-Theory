@@ -1,6 +1,6 @@
 import itertools
 from itertools import combinations
-from collections import defaultdict
+#from collections import defaultdict
 import numpy as np
 
 def uniform_prior(tpm):
@@ -142,6 +142,7 @@ def partition_pr(Xt_pr, subset):
     for state, state_pr in zip(all_states, Xt_pr):
         key = tuple(state[i] for i in subset)
         probs[key] += state_pr
+
     return list(probs.values())
 
 
@@ -244,7 +245,7 @@ def max_mi_bipartition(Xt_pr_prior, Xt_pr, tpm):
 
         # Present probabilities; treated as marginal even in the multiple case
         m1_pr = partition_pr(Xt_pr, m1)
-        m2_pr = partition_pr_prior(Xt_pr, m2)
+        m2_pr = partition_pr(Xt_pr, m2)
         print("P(m1t) =", m1_pr)
         print("P(m2t) =", m2_pr)
 
@@ -261,14 +262,15 @@ def max_mi_bipartition(Xt_pr_prior, Xt_pr, tpm):
         print("H(BtCt | Bt-1Ct-1) =", H_m2_m2past)
 
         # Marginal entropies
-        H_m1 = partition_marginal_entropy(m1_pr_prior)
+        H_m1 = partition_marginal_entropy(m1_pr)
         print("H(At) =", H_m1)
-        H_m2 = partition_marginal_entropy(m2_pr_prior)
+        H_m2 = partition_marginal_entropy(m2_pr)
         print("H(BtCt) =", H_m2)
 
         # Use the entropies to compute the mutual information across the partition
         mi_m1m2 = mi_across_partitions(H_m1, H_m2, H_m1_m1past, H_m2_m2past)
-
+        if(mi_m1m2 == 2):
+            print("On partition ", m1, m2, " we find the problem")
         # Find the current maximum mi across all paritions (i.e; least damaging cut)
         if mi_m1m2 > max_mi_m1m2:
             max_mi_m1m2 = mi_m1m2
@@ -319,12 +321,20 @@ def integrated_information(tpm, Xt_pr_prior):
     # Compute the integrated information
     ii = mi_Xt_Xtpast - max_mi
 
-    return ii, mi_Xt_Xtpast, max_bipartition, max_mi
+    # If a non-empty max_bipartition tuple (i.e; least damaging cut exists)
+    if max_bipartition:
+        return ii, mi_Xt_Xtpast, max_bipartition, max_mi
+
+    # Otherwise every cut contributes the same (i.e; 0 MI on every cut; fully
+    # integrated system)
+    return (ii, mi_Xt_Xtpast, "No partition found. Every cut is equally damaging!",
+            max_mi)
+
 
 # TEST CASES:
 
 # CASE 1: Mutual information is the same across every bipartition
-
+'''
 # State-by-state TPM
 tpm = np.array([[1,0,0,0,0,0,0,0],
                 [0,0,0,1,0,0,0,0],
@@ -340,12 +350,12 @@ prior = uniform_prior(tpm)
 
 # Compute the integrated information and corresponding intermediary quantities
 case1 = integrated_information(tpm, prior)
-'''
+
 print("\nIntegrated information: ", case1[0], "\n",
           "Mutual information across the network: ", case1[1], "\n",
           "Least Damaging Partition: ", case1[2], "\n",
-          "Minimum Mutual Information across partitions", case1[3])
-'''
+          "Maximum Mutual Information across partitions", case1[3])
+
 # CASE 2: Similar to case 1 but non-deterministic by splitting symmetrically vertically
 # State-by-state TPM. Still use uniform prior
 tpm = np.array([[0.5,0,0,0,0,0,0,0.5],
@@ -362,7 +372,44 @@ case2 = integrated_information(tpm, prior)
 print("\nIntegrated information: ", case2[0], "\n",
           "Mutual information across the network: ", case2[1], "\n",
           "Least Damaging Partition: ", case2[2], "\n",
-          "Minimum Mutual Information across partitions", case2[3])
+          "Maximum Mutual Information across partitions", case2[3])
 
 # Notice that the network is fully integrated in this case; seems to be as a result
 # of the "predictability" of the noise since everything is symmetric.
+
+# Case 3: Identity matrix (every node maps to itself). Should have no integrated
+# information since there is no mutual information across the network
+tpm = np.array([[1,0,0,0,0,0,0,0],
+                [0,1,0,0,0,0,0,0],
+                [0,0,1,0,0,0,0,0],
+                [0,0,0,1,0,0,0,0],
+                [0,0,0,0,1,0,0,0],
+                [0,0,0,0,0,1,0,0],
+                [0,0,0,0,0,0,1,0],
+                [0,0,0,0,0,0,0,1]])
+prior = uniform_prior(tpm)
+
+case3 = integrated_information(tpm, prior)
+print("\nIntegrated information: ", case3[0], "\n",
+          "Mutual information across the network: ", case3[1], "\n",
+          "Least Damaging Partition: ", case3[2], "\n",
+          "Maximum Mutual Information across partitions", case3[3])
+'''
+# Case 4: All information comes from node A. Should have no integrated information
+#         since there is only 1 bit coming from A and that information is lost in
+#         partitioning the node
+tpm = np.array([[1,0,0,0,0,0,0,0],
+                [1,0,0,0,0,0,0,0],
+                [1,0,0,0,0,0,0,0],
+                [1,0,0,0,0,0,0,0],
+                [0,0,0,0,0,0,0,1],
+                [0,0,0,0,0,0,0,1],
+                [0,0,0,0,0,0,0,1],
+                [0,0,0,0,0,0,0,1]])
+prior = uniform_prior(tpm)
+
+case4 = integrated_information(tpm, prior)
+print("\nIntegrated information: ", case4[0], "\n",
+          "Mutual information across the network: ", case4[1], "\n",
+          "Least Damaging Partition: ", case4[2], "\n",
+          "Maximum Mutual Information across partitions:", case4[3])
