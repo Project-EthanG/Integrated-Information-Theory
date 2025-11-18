@@ -65,8 +65,8 @@ def conditional_entropy(X, tpm, jointX):
     return H
 
 
-def mi(H_Xt, H_Xt_Xtpast):
-    return H_Xt - H_Xt_Xtpast
+def mi(H_full, H_pres_past):
+    return H_full - H_pres_past
 
 
 #########################
@@ -357,15 +357,15 @@ def integrated_information(tpm, prior):
     print("Joint pmf:", X_joint)
 
     # Marginal present entropy across the whole system
-    H_Xt = marginal_entropy(full_pres)
-    print("H(Xt) =", H_Xt)
+    H_full = marginal_entropy(full_pres)
+    print("H(Xt) =", H_full)
 
     # Conditional entropy of the present state of the whole system given the past state
-    H_Xt_Xtpast = conditional_entropy(full_pres, tpm, X_joint)
-    print("H(Xt | Xt-1) =", H_Xt_Xtpast)
+    H_pres_past = conditional_entropy(full_pres, tpm, X_joint)
+    print("H(Xt | Xt-1) =", H_pres_past)
 
     # Mutual information across the whole system based on the entropies
-    mi_Xt_Xtpast = mi(H_Xt, H_Xt_Xtpast)
+    mi_Xt_Xtpast = mi(H_full, H_pres_past)
     print("MI(Xt) =", mi_Xt_Xtpast)
 
     ##########################
