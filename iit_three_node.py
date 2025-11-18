@@ -1,7 +1,8 @@
 import itertools
 from itertools import combinations
-#from collections import defaultdict
+# from collections import defaultdict
 import numpy as np
+
 
 def uniform_prior(tpm):
     n_states = tpm.shape[0]
@@ -42,7 +43,7 @@ def marginal_entropy(X):
 
 def joint_prob(X, condX):
     n = len(X)
-    p_joint = np.empty((n,n))
+    p_joint = np.empty((n, n))
     # Through marginal states (i.e; past states)
     for i in range(n):
         # Through other (i.e; present states)
@@ -104,9 +105,8 @@ def generate_bipartitions(tpm):
 
 # Need to find the subset priors first
 def partition_pr_prior(Xt_past_prior, subset):
-
     n_partition_states = len(subset)
-    n_nodes = int(np.log2(len(Xt_past_prior))) # cast as int since it is coming from np
+    n_nodes = int(np.log2(len(Xt_past_prior)))  # cast as int since it is coming from np
     print("n_nodes", n_nodes)
 
     all_states = all_binary_states(n_nodes)
@@ -146,46 +146,106 @@ def partition_pr(Xt_pr, subset):
     return list(probs.values())
 
 
-def partition_pr_cond(condX, subset):
-
-    n_states = condX.shape[0]
+def partition_pr_cond(tpm, prior, subset):
+    # In a 3 node case, N = 2^3 = 8
+    n_states = tpm.shape[0]
     n_nodes = int(np.log2(n_states))
 
-    all_states = all_binary_states(n_nodes)
+    ######################
+    ## 1) Compute joint ##
+    ######################
+
+    # Method A) Use explicit looping
+
+    # To hold joint prob dist. of subsystem
+    joint_full = np.zeros((n_states, n_states), dtype=float)
+
+    # Loop through past states
+    for i in range(n_states):
+        # Loop through present states
+        for j in range(n_states):
+            joint_full[i][j] = prior[i] * tpm[i][j]
+
+    print("J =", joint_full)
+
+    ##################################################
+    ## 2) Project full indices to subsystem indices ##
+    ##################################################
+
+    # Every permutation of states in the full system
+    all_n_states = all_binary_states(n_nodes)
+
+    # Number of nodes in subsystem
     k = len(subset)
-    subset_states = all_binary_states(k)
 
-    # Index like in the marginal.
-    past_groups = {s: [] for s in subset_states}
-    for full_index, full_state in enumerate(all_states):
-        sub = tuple(full_state[i] for i in subset)
-        past_groups[sub].append(full_index)
+    # Every permutation of states in the subsystem
+    all_s_states = all_binary_states(k)
+    print(subset, " state permutations:", all_s_states)
 
-    # Now compute conditional P(subset_t | subset_t-1)
-    cond_subset = []
+    # Store the subsystem states in a dict to map to corresponding indices
 
-    for past_sub in subset_states:
-        row = np.zeros(len(subset_states))
+    # Based way to extract indices and values from the list
+    s_index_mapping = {state: s for s, state in enumerate(all_s_states)}
 
-        # For each full past state mapping to this subset state
-        for past_full_idx in past_groups[past_sub]:
+    # Mapping from the full system indices to the subsystem indices
+    full_to_sub = np.zeros(8, dtype=int)
 
-            # Get full conditional distribution from TPM row
-            full_row = condX[past_full_idx]
+    # Using both the indices and the permutations from all states
+    for n_index, full_state in enumerate(all_n_states):
+        # Obtain the corresponding nodes states in the current permutation
+        sub_key = tuple(full_state[k] for k in subset)
+        print("sub_key on current iteration: ", sub_key)
 
-            # For each full present state, map to subset present
-            for pres_full_idx, p in enumerate(full_row):
-                pres_full_state = all_states[pres_full_idx]
-                pres_sub = tuple(pres_full_state[i] for i in subset)
-                row[subset_states.index(pres_sub)] += p
+        # Store the corresponding index value for the subsystem key selected
+        s_index = s_index_mapping[sub_key]
 
-        # Normalize (since it may sum across many full states)
-        row /= row.sum()
+        # Store in a list to properly order the subsystem lexicographically
+        full_to_sub[n_index] = s_index
 
-        cond_subset.append(row)
+    print("Map from full indices to subsystem indices:", full_to_sub)
 
-    return np.array(cond_subset)
+    #############################################
+    ## 3) Aggregate joint into subsystem joint ##
+    #############################################
 
+    # Number of state permutations in the subsystem
+    m = 2 ** k
+
+    # To hold the joint prob. dist. for the subsystem. Should be (MxM)
+    joint_s = np.zeros((m, m))
+
+    # Looping through the past states of the full joint network
+    for i in range(0, n_states):
+        # Index for the past state of the subsystem
+        u = full_to_sub[i]
+
+        # Looping through the present states of the full joint network
+        for j in range(0, n_states):
+            # Index for the present state of the subsystem
+            v = full_to_sub[j]
+
+            # Add the values (prior already accounted for in determining the full joint)
+            joint_s[u][v] += joint_full[i][j]
+
+    print("Joint prob. dist. of S: ", joint_s)
+
+    ## 4) Compute marginal past from J(s) and the cond. pres. given past under the subsystem
+
+    # Prior
+    prior = partition_pr_prior(prior, subset)
+    print("Prior of S: ", prior)
+
+    # Conditional dist.
+    Q_s = np.zeros((m, m))
+    # Method 1) Raw dog
+    for u in range(m):
+        for v in range(m):
+            # Need to account for 0 case
+            if prior[u] > 0:
+                Q_s[u][v] = joint_s[u][v] / prior[u]
+
+    print("Conditional dist. of S present given S past:", Q_s)
+    return Q_s
 
 # Compute marginal entropy and conditional entropy
 def partition_conditional_entropy(subset_pr_past, subset_pr_cond):
@@ -233,43 +293,43 @@ def max_mi_bipartition(Xt_pr_prior, Xt_pr, tpm):
     max_mi_m1m2 = 0
 
     for m1, m2 in bipartitions:
-        print("\nCurrent partition:", m1, m2)
+        print("\nCurrent partition: S_1 =", m1, "S_2 = ", m2)
         m1 = list(m1)
         m2 = list(m2)
 
         # Prior probabilities
         m1_pr_prior = partition_pr_prior(Xt_pr_prior, m1)
         m2_pr_prior = partition_pr_prior(Xt_pr_prior, m2)
-        print("P(m1t-1) =", m1_pr_prior)
-        print("P(m2t-1) =", m2_pr_prior)
+        print("P(S_1t-1) =", m1_pr_prior)
+        print("P(S_2t-1) =", m2_pr_prior)
 
         # Present probabilities; treated as marginal even in the multiple case
         m1_pr = partition_pr(Xt_pr, m1)
         m2_pr = partition_pr(Xt_pr, m2)
-        print("P(m1t) =", m1_pr)
-        print("P(m2t) =", m2_pr)
+        print("P(S_1t) =", m1_pr)
+        print("P(S_2t) =", m2_pr)
 
         # Conditional probabilities
-        m1_pr_cond = partition_pr_cond(tpm, m1)
-        print("P(m1_t | m1_{t-1}) =", m1_pr_cond)
-        m2_pr_cond = partition_pr_cond(tpm, m2)
-        print("P(m2_t | m2_{t-1}) =", m2_pr_cond)
+        m1_pr_cond = partition_pr_cond(tpm, Xt_pr_prior, m1)
+        print("P(S_1t | S_1t-1) =", m1_pr_cond)
+        m2_pr_cond = partition_pr_cond(tpm, Xt_pr_prior, m2)
+        print("P(S_2t | S_2t-1) =", m2_pr_cond)
 
         # Conditional entropies
         H_m1_m1past = partition_conditional_entropy(m1_pr_prior, m1_pr_cond)
-        print("H(At | At-1) =", H_m1_m1past)
+        print("H(S_1t | S_2t-1) =", H_m1_m1past)
         H_m2_m2past = partition_conditional_entropy(m2_pr_prior, m2_pr_cond)
-        print("H(BtCt | Bt-1Ct-1) =", H_m2_m2past)
+        print("H(S_2 | S_2t-1) =", H_m2_m2past)
 
         # Marginal entropies
         H_m1 = partition_marginal_entropy(m1_pr)
-        print("H(At) =", H_m1)
+        print("H(S_1) =", H_m1)
         H_m2 = partition_marginal_entropy(m2_pr)
-        print("H(BtCt) =", H_m2)
+        print("H(S_2) =", H_m2)
 
         # Use the entropies to compute the mutual information across the partition
         mi_m1m2 = mi_across_partitions(H_m1, H_m2, H_m1_m1past, H_m2_m2past)
-        if(mi_m1m2 == 2):
+        if (mi_m1m2 == 2):
             print("On partition ", m1, m2, " we find the problem")
         # Find the current maximum mi across all paritions (i.e; least damaging cut)
         if mi_m1m2 > max_mi_m1m2:
@@ -398,18 +458,19 @@ print("\nIntegrated information: ", case3[0], "\n",
 # Case 4: All information comes from node A. Should have no integrated information
 #         since there is only 1 bit coming from A and that information is lost in
 #         partitioning the node
-tpm = np.array([[1,0,0,0,0,0,0,0],
-                [1,0,0,0,0,0,0,0],
-                [1,0,0,0,0,0,0,0],
-                [1,0,0,0,0,0,0,0],
-                [0,0,0,0,0,0,0,1],
-                [0,0,0,0,0,0,0,1],
-                [0,0,0,0,0,0,0,1],
-                [0,0,0,0,0,0,0,1]])
+tpm = np.array([[1, 0, 0, 0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 0, 0, 0, 1]])
 prior = uniform_prior(tpm)
 
 case4 = integrated_information(tpm, prior)
 print("\nIntegrated information: ", case4[0], "\n",
-          "Mutual information across the network: ", case4[1], "\n",
-          "Least Damaging Partition: ", case4[2], "\n",
-          "Maximum Mutual Information across partitions:", case4[3])
+      "Mutual information across the network: ", case4[1], "\n",
+      "Least Damaging Partition: ", case4[2], "\n",
+      "Maximum Mutual Information across partitions:", case4[3])
+
