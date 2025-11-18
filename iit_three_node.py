@@ -9,9 +9,9 @@ def uniform_prior(tpm):
     return [1 / n_states] * n_states
 
 
-def marginal_probability(X, condX):
+def marginal_probability(X, tpm):
     # Number of states; corresponds to number of rows in tpm (or column)
-    n_states = condX.shape[0]
+    n_states = tpm.shape[0]
 
     # Use law of total probability: P(Xt) = sum_{Xt-1} P(Xt | Xt-1) * P(Xt-1)
     X_marg = np.empty(n_states)
@@ -19,7 +19,7 @@ def marginal_probability(X, condX):
         # Iteratively add to each marginal present state probability
         X_marg[pres_state] = 0
         for past_state in range(n_states):
-            X_marg[pres_state] += condX[past_state][pres_state] * X[past_state]
+            X_marg[pres_state] += tpm[past_state][pres_state] * X[past_state]
 
     return X_marg
 
@@ -41,18 +41,18 @@ def marginal_entropy(X):
     return H
 
 
-def joint_prob(X, condX):
+def joint_prob(X, tpm):
     n = len(X)
     p_joint = np.empty((n, n))
     # Through marginal states (i.e; past states)
     for i in range(n):
         # Through other (i.e; present states)
         for j in range(n):
-            p_joint[i][j] = X[i] * condX[i][j]
+            p_joint[i][j] = X[i] * tpm[i][j]
     return p_joint
 
 
-def conditional_entropy(X, condX, jointX):
+def conditional_entropy(X, tpm, jointX):
     H = 0
     n = len(X)
     # Iterate through past states
@@ -60,8 +60,8 @@ def conditional_entropy(X, condX, jointX):
         # Iterate through present states
         for j in range(n):
             # No changes under 0 log(0) case
-            if X[j] != 0 and condX[i][j] != 0:
-                H -= jointX[i, j] * np.log2(condX[i][j])
+            if X[j] != 0 and tpm[i][j] != 0:
+                H -= jointX[i, j] * np.log2(tpm[i][j])
     return H
 
 
@@ -104,9 +104,9 @@ def generate_bipartitions(tpm):
 
 
 # Need to find the subset priors first
-def partition_pr_prior(Xt_past_prior, subset):
+def partition_pr_prior(prior, subset):
     n_partition_states = len(subset)
-    n_nodes = int(np.log2(len(Xt_past_prior)))  # cast as int since it is coming from np
+    n_nodes = int(np.log2(len(prior)))  # cast as int since it is coming from np
     print("n_nodes", n_nodes)
 
     all_states = all_binary_states(n_nodes)
@@ -117,7 +117,7 @@ def partition_pr_prior(Xt_past_prior, subset):
 
     # Loop through each node within the corresponding prior. This is used to
     # accumulate node by node
-    for state, state_pr_prior in zip(all_states, Xt_past_prior):
+    for state, state_pr_prior in zip(all_states, prior):
         # Store the "node"th element of the current permutation as a key. This
         # key is used to know which probability to "increment" each time it is
         # found in a new permutation. In the 1 node partition case, the only
@@ -131,15 +131,15 @@ def partition_pr_prior(Xt_past_prior, subset):
 
 # Compute marginal present probabilities in a similar manner to the prior for the
 # partition
-def partition_pr(Xt_pr, subset):
-    n_nodes = int(np.log2(len(Xt_pr)))
+def partition_pr(full_pres, subset):
+    n_nodes = int(np.log2(len(full_pres)))
     n_partition_states = len(subset)
 
     all_states = all_binary_states(n_nodes)
     subset_states = all_binary_states(n_partition_states)
 
     probs = {s: 0.0 for s in subset_states}
-    for state, state_pr in zip(all_states, Xt_pr):
+    for state, state_pr in zip(all_states, full_pres):
         key = tuple(state[i] for i in subset)
         probs[key] += state_pr
 
@@ -248,21 +248,21 @@ def partition_pr_cond(tpm, prior, subset):
     return Q_s
 
 # Compute marginal entropy and conditional entropy
-def partition_conditional_entropy(subset_pr_past, subset_pr_cond):
+def partition_conditional_entropy(s_prior, s_pr_cond):
     H = 0.0
-    k = len(subset_pr_past)
-    n = len(subset_pr_cond[0])
+    k = len(s_prior)
+    n = len(s_pr_cond[0])
     for i in range(k):
         for j in range(n):
-            if subset_pr_cond[i][j] > 0 and subset_pr_past[i] > 0:
-                H -= (subset_pr_past[i] * subset_pr_cond[i][j]
-                      * np.log2(subset_pr_cond[i][j]))
+            if s_pr_cond[i][j] > 0 and s_prior[i] > 0:
+                H -= (s_prior[i] * s_pr_cond[i][j]
+                      * np.log2(s_pr_cond[i][j]))
     return H
 
 
-def partition_marginal_entropy(subset_pr):
+def partition_marginal_entropy(s_pr):
     H = 0.0
-    for p in subset_pr:
+    for p in s_pr:
         if p > 0:
             H -= p * np.log2(p)
     return H
@@ -274,7 +274,7 @@ def mi_across_partitions(H_m1, H_m2, H_m1_m1past, H_m2_m2past):
     return mi_m1 + mi_m2
 
 
-def max_mi_bipartition(Xt_pr_prior, Xt_pr, tpm):
+def max_mi_bipartition(prior, full_pres, tpm):
     # Need the number of states and corresponding "nodes" (how many neurons can we
     # separate?)
     n_states = tpm.shape[0]
@@ -298,21 +298,21 @@ def max_mi_bipartition(Xt_pr_prior, Xt_pr, tpm):
         m2 = list(m2)
 
         # Prior probabilities
-        m1_pr_prior = partition_pr_prior(Xt_pr_prior, m1)
-        m2_pr_prior = partition_pr_prior(Xt_pr_prior, m2)
+        m1_pr_prior = partition_pr_prior(prior, m1)
+        m2_pr_prior = partition_pr_prior(prior, m2)
         print("P(S_1t-1) =", m1_pr_prior)
         print("P(S_2t-1) =", m2_pr_prior)
 
         # Present probabilities; treated as marginal even in the multiple case
-        m1_pr = partition_pr(Xt_pr, m1)
-        m2_pr = partition_pr(Xt_pr, m2)
+        m1_pr = partition_pr(full_pres, m1)
+        m2_pr = partition_pr(full_pres, m2)
         print("P(S_1t) =", m1_pr)
         print("P(S_2t) =", m2_pr)
 
         # Conditional probabilities
-        m1_pr_cond = partition_pr_cond(tpm, Xt_pr_prior, m1)
+        m1_pr_cond = partition_pr_cond(tpm, prior, m1)
         print("P(S_1t | S_1t-1) =", m1_pr_cond)
-        m2_pr_cond = partition_pr_cond(tpm, Xt_pr_prior, m2)
+        m2_pr_cond = partition_pr_cond(tpm, prior, m2)
         print("P(S_2t | S_2t-1) =", m2_pr_cond)
 
         # Conditional entropies
@@ -339,29 +339,29 @@ def max_mi_bipartition(Xt_pr_prior, Xt_pr, tpm):
     return max_mi_m1m2, max_partition
 
 
-def integrated_information(tpm, Xt_pr_prior):
+def integrated_information(tpm, prior):
     # We wish to find the integrated information. We need the mutual information of
     # the entire network, and the maximum mutual information across each bipartition
     # to find to the integrated information
 
     # Display the inputs (tpm and prior)
     print("Inputted TPM: \n", tpm)
-    print("P(Xt-1) =", Xt_pr_prior)
+    print("P(Xt-1) =", prior)
 
     # Compute the marginal present probabilities for the states from the prior and tpm
-    Xt_pr = marginal_probability(Xt_pr_prior, tpm)
-    print("P(Xt) =", Xt_pr)
+    full_pres = marginal_probability(prior, tpm)
+    print("P(Xt) =", full_pres)
 
     # Compute jointly present and past states (used in conditional entropy calculation)
-    X_joint = joint_prob(Xt_pr_prior, tpm)
+    X_joint = joint_prob(prior, tpm)
     print("Joint pmf:", X_joint)
 
     # Marginal present entropy across the whole system
-    H_Xt = marginal_entropy(Xt_pr)
+    H_Xt = marginal_entropy(full_pres)
     print("H(Xt) =", H_Xt)
 
     # Conditional entropy of the present state of the whole system given the past state
-    H_Xt_Xtpast = conditional_entropy(Xt_pr, tpm, X_joint)
+    H_Xt_Xtpast = conditional_entropy(full_pres, tpm, X_joint)
     print("H(Xt | Xt-1) =", H_Xt_Xtpast)
 
     # Mutual information across the whole system based on the entropies
@@ -376,7 +376,7 @@ def integrated_information(tpm, Xt_pr_prior):
 
     # Find the prior, present and conditional probabilities for every bipartition. Use
     # these intermediary quantities to find the maximum mutual information
-    max_mi, max_bipartition = max_mi_bipartition(Xt_pr_prior, Xt_pr, tpm)
+    max_mi, max_bipartition = max_mi_bipartition(prior, full_pres, tpm)
 
     # Compute the integrated information
     ii = mi_Xt_Xtpast - max_mi
