@@ -157,6 +157,8 @@ def partition_pr_cond(tpm, prior, subset):
 
     # Method A) Use explicit looping
 
+    print("\nWorking through subsystem", subset, "...")
+
     # To hold joint prob dist. of subsystem
     joint_full = np.zeros((n_states, n_states), dtype=float)
 
@@ -488,7 +490,8 @@ print("\nIntegrated information: ", case5[0], "\n",
       "Least Damaging Partition: ", case5[2], "\n",
       "Maximum Mutual Information across partitions:", case5[3])
 '''
-# Case 6: A = AND(B,C), B = OR(A,C), C = XOR(A,B), D = COPY(D)
+# Case 6: A = AND(B,C), B = OR(A,C), C = XOR(A,B), D = COPY(D). D is isolated in this
+# network so it should be the least damaging cut, giving 0 integrated information
 tpm = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                 [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                 [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -512,3 +515,4 @@ print("\nIntegrated information: ", case6[0], "\n",
       "Mutual information across the network: ", case6[1], "\n",
       "Least Damaging Partition: ", case6[2], "\n",
       "Maximum Mutual Information across partitions:", case6[3])
+
