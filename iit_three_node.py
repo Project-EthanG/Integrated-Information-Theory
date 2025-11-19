@@ -36,7 +36,7 @@ def marginal_entropy(X):
         # Otherwise compute shannon entropy as normal. Use log2 only if there are two
         # states per node, otherwise adjust accordingly
 
-        if X[pres_state] != 0:
+        if X[pres_state] > 0:
             H -= X[pres_state] * np.log2(X[pres_state])
     return H
 
@@ -60,7 +60,7 @@ def conditional_entropy(X, tpm, jointX):
         # Iterate through present states
         for j in range(n):
             # No changes under 0 log(0) case
-            if X[j] != 0 and tpm[i][j] != 0:
+            if X[j] > 0 and tpm[i][j] > 0:
                 H -= jointX[i, j] * np.log2(tpm[i][j])
     return H
 
@@ -188,7 +188,7 @@ def partition_pr_cond(tpm, prior, subset):
     s_index_mapping = {state: s for s, state in enumerate(all_s_states)}
 
     # Mapping from the full system indices to the subsystem indices
-    full_to_sub = np.zeros(8, dtype=int)
+    full_to_sub = np.zeros(shape=n_states, dtype=int)
 
     # Using both the indices and the permutations from all states
     for n_index, full_state in enumerate(all_n_states):
@@ -454,7 +454,7 @@ print("\nIntegrated information: ", case3[0], "\n",
           "Mutual information across the network: ", case3[1], "\n",
           "Least Damaging Partition: ", case3[2], "\n",
           "Maximum Mutual Information across partitions", case3[3])
-'''
+
 # Case 4: All information comes from node A. Should have no integrated information
 #         since there is only 1 bit coming from A and that information is lost in
 #         partitioning the node
@@ -474,3 +474,41 @@ print("\nIntegrated information: ", case4[0], "\n",
       "Least Damaging Partition: ", case4[2], "\n",
       "Maximum Mutual Information across partitions:", case4[3])
 
+# Case 5: everything turns off, unless it is already on (A and B)
+tpm = np.array([[1, 0, 0, 0],
+                [1, 0, 0, 0],
+                [1, 0, 0, 0],
+                [0, 0, 0, 1]])
+
+prior = uniform_prior(tpm)
+
+case5 = integrated_information(tpm, prior)
+print("\nIntegrated information: ", case5[0], "\n",
+      "Mutual information across the network: ", case5[1], "\n",
+      "Least Damaging Partition: ", case5[2], "\n",
+      "Maximum Mutual Information across partitions:", case5[3])
+'''
+# Case 6: A = AND(B,C), B = OR(A,C), C = XOR(A,B), D = COPY(D)
+tpm = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]])
+prior = uniform_prior(tpm)
+
+case6 = integrated_information(tpm, prior)
+print("\nIntegrated information: ", case6[0], "\n",
+      "Mutual information across the network: ", case6[1], "\n",
+      "Least Damaging Partition: ", case6[2], "\n",
+      "Maximum Mutual Information across partitions:", case6[3])
