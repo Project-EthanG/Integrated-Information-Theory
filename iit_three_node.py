@@ -3,6 +3,8 @@ from itertools import combinations
 # from collections import defaultdict
 import numpy as np
 
+from tpm_generator import generate_det_tpm
+
 
 def uniform_prior(tpm):
     n_states = tpm.shape[0]
@@ -396,7 +398,7 @@ def integrated_information(tpm, prior):
 # TEST CASES:
 
 # CASE 1: Mutual information is the same across every bipartition
-'''
+
 # State-by-state TPM
 tpm = np.array([[1,0,0,0,0,0,0,0],
                 [0,0,0,1,0,0,0,0],
@@ -489,25 +491,27 @@ print("\nIntegrated information: ", case5[0], "\n",
       "Mutual information across the network: ", case5[1], "\n",
       "Least Damaging Partition: ", case5[2], "\n",
       "Maximum Mutual Information across partitions:", case5[3])
-'''
+
 # Case 6: A = AND(B,C), B = OR(A,C), C = XOR(A,B), D = COPY(D). D is isolated in this
 # network so it should be the least damaging cut, giving 0 integrated information
-tpm = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-                [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-                [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]])
+tpm = np.array([
+     [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+     [0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+     [0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],
+     [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],
+     [0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0],
+     [0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0],
+     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0],
+     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+     [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],
+     [0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],
+     [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],
+     [0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],
+     [0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],
+     [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],
+     [0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0],
+     [0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0]
+])
 prior = uniform_prior(tpm)
 
 case6 = integrated_information(tpm, prior)
@@ -515,4 +519,12 @@ print("\nIntegrated information: ", case6[0], "\n",
       "Mutual information across the network: ", case6[1], "\n",
       "Least Damaging Partition: ", case6[2], "\n",
       "Maximum Mutual Information across partitions:", case6[3])
+
+# Case 7: a collection of random tpms of fixed size (3 node):
+tpm_dim = 2**3
+n_nodes = np.log2(tpm_dim)
+n_tpms = 5
+tpms = generate_det_tpm(tpm_dim, n_tpms)
+prior = uniform_prior(tpms[0])
+
 
