@@ -391,34 +391,4 @@ def integrated_information(tpm, prior):
             max_mi)
 
 
-# Example usage: A = AND(B,C), B = OR(A,C), C = XOR(A,B), D = COPY(D).
-# D is isolated in this network so it should be the least damaging cut,
-# giving 0 integrated information
-tpm = np.array([
-     [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-     [0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-     [0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],
-     [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],
-     [0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0],
-     [0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0],
-     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0],
-     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-     [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],
-     [0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],
-     [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],
-     [0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],
-     [0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],
-     [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],
-     [0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0],
-     [0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0]
-])
-prior = uniform_prior(tpm)
-
-case6 = integrated_information(tpm, prior)
-print("\nIntegrated information: ", case6[0], "\n",
-      "Mutual information across the network: ", case6[1], "\n",
-      "Least Damaging Partition: ", case6[2], "\n",
-      "Maximum Mutual Information across partitions:", case6[3])
-
-
 
