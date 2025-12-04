@@ -1,8 +1,20 @@
 import itertools
 from itertools import combinations
 import numpy as np
+import os
 
 # Define all necessary function prior to computing integrated information
+
+# Going to store necessary information to a file
+filename = "output.txt"
+
+# Clear out content if the file already exists
+with open(filename, "w") as f:
+    pass
+
+with open(filename, "a") as f:
+    f.write(f"II\t MI\t max_bi\t max_mi")
+    f.write(f"\n")
 
 def uniform_prior(tpm):
     n_states = tpm.shape[0]
@@ -12,6 +24,7 @@ def uniform_prior(tpm):
 def marginal_probability(X, tpm):
     # Number of states; corresponds to number of rows in tpm (or column)
     n_states = tpm.shape[0]
+    print("n_states:", n_states)
 
     # Use law of total probability: P(Xt) = sum_{Xt-1} P(Xt | Xt-1) * P(Xt-1)
     X_marg = np.empty(n_states)
@@ -380,6 +393,12 @@ def integrated_information(tpm, prior):
 
     # Compute the integrated information
     ii = mi_Xt_Xtpast - max_mi
+
+    # Write new content to file
+    with open(filename, "a") as f:
+        for x in ii, mi_Xt_Xtpast, max_bipartition, max_mi:
+            f.write(f"{x}\t")
+        f.write(f"\n")
 
     # If a non-empty max_bipartition tuple (i.e; least damaging cut exists)
     if max_bipartition:
