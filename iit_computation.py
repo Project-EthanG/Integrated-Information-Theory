@@ -160,13 +160,18 @@ def partition_pr(full_pres, subset):
 
 
 def partition_pr_cond(tpm, prior, subset):
-    # In a 3 node case, N = 2^3 = 8
+    # Inputs:
+    #   tpm (2D np.array(float)): transition probability matrix for the full system
+    #   prior (list(float)):  prior probability for system
+    #   subset (2D list(int)): partition of interest
+
+    # Outputs:
+    #   Q_s (2D np.array(float)): conditional probability distribution for subset
+
     n_states = tpm.shape[0]
     n_nodes = int(np.log2(n_states))
 
-    ######################
     ## 1) Compute joint ##
-    ######################
 
     # Method A) Use explicit looping
 
@@ -183,9 +188,7 @@ def partition_pr_cond(tpm, prior, subset):
 
     print("J =", joint_full)
 
-    ##################################################
     ## 2) Project full indices to subsystem indices ##
-    ##################################################
 
     # Every permutation of states in the full system
     all_n_states = all_binary_states(n_nodes)
@@ -264,6 +267,12 @@ def partition_pr_cond(tpm, prior, subset):
 
 # Compute marginal entropy and conditional entropy
 def partition_conditional_entropy(s_prior, s_pr_cond):
+    # Inputs:
+    #   s_prior list(float): prior probability distribution
+    #   s_pr_cond: cpd for present probabilities conditioned on prior
+
+    # Outputs:
+    #   H (float): conditional entropy of the system
     H = 0.0
     k = len(s_prior)
     n = len(s_pr_cond[0])
@@ -276,6 +285,11 @@ def partition_conditional_entropy(s_prior, s_pr_cond):
 
 
 def partition_marginal_entropy(s_pr):
+    # Inputs:
+    #   s_pr list(float): probability distribution
+
+    # Outputs:
+    #   H (float): entropy of the system under the probability distribution
     H = 0.0
     for p in s_pr:
         if p > 0:
