@@ -1,25 +1,12 @@
 import itertools
 from itertools import combinations
 import numpy as np
-import os
 
 # Define all necessary function prior to computing integrated information
-
-# Going to store necessary information to a file
-filename = "output.txt"
-
-# Clear out content if the file already exists
-with open(filename, "w") as f:
-    pass
-
-with open(filename, "a") as f:
-    f.write(f"II\t MI\t max_bi\t max_mi")
-    f.write(f"\n")
 
 def uniform_prior(tpm):
     n_states = tpm.shape[0]
     return [1 / n_states] * n_states
-
 
 def marginal_probability(X, tpm):
     # Number of states; corresponds to number of rows in tpm (or column)
@@ -303,7 +290,7 @@ def mi_across_partitions(H_m1, H_m2, H_m1_m1past, H_m2_m2past):
     return mi_m1 + mi_m2
 
 
-def max_mi_bipartition(prior, full_pres, tpm):
+def max_mi_bipartition(prior, full_pres, tpm) -> tuple[float, tuple[list[int]]]:
     # Need the number of states and corresponding "nodes" (how many neurons can we
     # separate?)
     n_states = tpm.shape[0]
@@ -368,7 +355,7 @@ def max_mi_bipartition(prior, full_pres, tpm):
     return max_mi_m1m2, max_partition
 
 
-def integrated_information(tpm, prior):
+def integrated_information(tpm, prior) -> tuple[float, float, tuple[list[int]] | None, float]:
     # We wish to find the integrated information. We need the mutual information of
     # the entire network, and the maximum mutual information across each bipartition
     # to find to the integrated information
@@ -394,7 +381,7 @@ def integrated_information(tpm, prior):
     print("H(Xt | Xt-1) =", H_pres_past)
 
     # Mutual information across the whole system based on the entropies
-    mi_Xt_Xtpast = mi(H_full, H_pres_past)
+    mi_Xt_Xtpast: float = mi(H_full, H_pres_past)
     print("MI(Xt) =", mi_Xt_Xtpast)
 
     ## PARTITION COMPUTATIONS ##
@@ -408,19 +395,13 @@ def integrated_information(tpm, prior):
     # Compute the integrated information
     ii = mi_Xt_Xtpast - max_mi
 
-    # Write new content to file
-    with open(filename, "a") as f:
-        for x in ii, mi_Xt_Xtpast, max_bipartition, max_mi:
-            f.write(f"{x}\t")
-        f.write(f"\n")
-
     # If a non-empty max_bipartition tuple (i.e; least damaging cut exists)
     if max_bipartition:
         return ii, mi_Xt_Xtpast, max_bipartition, max_mi
 
     # Otherwise every cut contributes the same (i.e; 0 MI on every cut; fully
     # integrated system)
-    return (ii, mi_Xt_Xtpast, "No partition found. Every cut is equally damaging!",
+    return (ii, mi_Xt_Xtpast, None,
             max_mi)
 
 
