@@ -8,6 +8,7 @@ def uniform_prior(tpm):
     n_states = tpm.shape[0]
     return [1 / n_states] * n_states
 
+
 def marginal_probability(X, tpm):
     # Number of states; corresponds to number of rows in tpm (or column)
     n_states = tpm.shape[0]
