@@ -1,12 +1,9 @@
 # The goal of this file is to generate a tpm given a fixed size, which will be used
 # to generate the training data for the eventual neural network
 import numpy as np
+from numpy.typing import NDArray
 import random
-import time
 
-# Numpy has a built-in random function, but the random library is much faster
-
-start_time = time.time()
 
 def generate_random_det_tpm(dim):
 
@@ -16,71 +13,91 @@ def generate_random_det_tpm(dim):
         tpm[row][random_col] = 1
     return tpm
 
-'''
-We are looking to implement a function which has the TPM be randomly 
-weighted by a linear-style network. Naturally we need the weights to be
-independently drawn, then added to some bias. We can then classify the
-state as changing or not changing depending on the range decided by the
-weight
-'''
 
-def bias_generator(dim):
-    # Generate biases for the TPM. One bias per row
-    biases = np.random.rand(dim)
-    return biases
+def bias_generator(n: int) -> NDArray[np.float64]:
+    # Generate biases for the TPM. One bias per node (n nodes in the system)
+    return np.random.rand(n)
 
 
-def weight_generator(dim):
-    # Generate weights for the tpm. One weight per cell in the tpm
-    weights = np.random.rand(dim, dim)
-    return weights
+def weight_generator(n: int) -> NDArray[np.float64]:
+    # Generate weights for the TPM. One weight influence per node. Nodes can have weights
+    # on themselves as well, so, there are (n x n) weights. Shape is encoded in NDArray
+    # datatype, so we cannot specify it to be 2d in the functions output
+    return np.random.rand(n, n)
 
 
-def argmax_ac_fn(tpm_linear):
-    # Deterministic activation function, namely, the argmax
-    max_indices = np.argmax(tpm_linear, axis=1)
-
-    # Apply full weight to the maximized output for each row
-    tpm_argmax = np.zeros((dim, dim))
-    tpm_argmax[np.arange(dim), max_indices] = 1
-
-    return tpm_argmax
+def logistic_scalar(p: float) -> float:
+    # An activation function used to calculate the influence of a past state on a specific
+    # node's present state
+    return 1 / (1 + np.exp(-p))
 
 
-def logistic_ac_fn(tpm_linear):
-    # Probabilistic activation function: logistic
-    probs = 1 / (1 + np.exp(tpm_linear))
+def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[np.float64]) -> NDArray[np.float64]:
+    # Generates a tpm based on pre-defined biases for each node and weights for each node's influence
 
-    # Probabilities are not automatically normalized for the sigmoid fn
-    tpm_sigmoid = probs / probs.sum(axis=1, keepdims=True)
+    # Num states when there are n nodes
+    N = 2**n
 
-    return tpm_sigmoid
+    # Empty state-by-state TPM (N x N), where N = 2**n
+    tpm_linearly_generated: NDArray[np.float64] = np.zeros((N, N))
 
+    # Start with manual looping through the state-by-state TPM. I will look to optimize this later
+    rows, cols = tpm_linearly_generated.shape
 
-def generate_lin_weighted_tpm(dim, seed):
-    weights = weight_generator(dim)
-    biases = bias_generator(dim)
+    for row in range(rows):
+        # Store the state as a vector. Needed to compute the linear term
+        past_state: NDArray[np.float64] = np.array([(row >> (n - 1 - i)) & 1 for i in range(n)])
 
-    # Linear output for each cell. [:, newaxis] is needed to ensure
-    # there is one bias added per row)
-    tpm_linear = weights + biases[:, np.newaxis]
+        prob_on: NDArray[np.float64] = np.zeros(n)
+        for i in range(n):
+            # Linear output is based on biases and weights. Serves as an input for the activation fn
+            linear_output: float = biases[i] + np.dot(weights[:, i], past_state)
+            prob_on[i] = logistic_scalar(linear_output)
 
-    # On its own this is a new TPM with no activation function.
-    # If we want, we can have it use any number of activation functions...
+        for col in range(cols):
+            present_state: NDArray[np.float64] = np.array([(col >> (n - 1 - i)) & 1 for i in range(n)])
 
-    # Deterministic activation (argmax):
-    # argmax_ac_fn(tpm_linear)
+            prob_joint = 1.0
+            for i in range(n):
+                # If the
+                if present_state[i] == 1:
+                    prob_joint *= prob_on[i]
+                else:
+                    prob_joint *= (1 - prob_on[i])
 
-    # Probabilistic activation:
+            tpm_linearly_generated[row, col] = prob_joint
+    return tpm_linearly_generated
 
-    # Logistic activation fn
-    tpm_transformed = logistic_ac_fn(tpm_linear)
-
-    # Hyperbolic Tangent activation fn
-
-    return tpm_transformed
 
 # Example usage
-dim = 8
-tpm = generate_lin_weighted_tpm(dim, seed = 50)
-print("Weighted TPM:\n", tpm)
+
+# 3 node system with randomly generated biases and weights
+n = 3
+biases = bias_generator(n)
+weights = weight_generator(n)
+
+tpm_linear = tpm_linear_generator(n, biases, weights)
+
+print(tpm_linear)
+
+# 3 node system with specified weights and biases
+n = 3
+biases = np.array([0.1,0.2,0.9])
+weights = np.array([[0.2,0,0],[0.3,0,0.5],[0.4,0.7,0.05]])
+tpm_linear = tpm_linear_generator(n, biases, weights)
+print(tpm_linear[1][5])
+
+# Compare to "manual" calculations
+p1 = logistic_scalar(0.1 + 0.2*1 + 0.3*0 + 0.4*1)
+p2 = logistic_scalar(0.2 + 0*1 + 0*0 + 0.7*1)
+p3 = logistic_scalar(0.9 + 0*1 + 0.5*0 + 0.05*1)
+print(p1 * (1-p2) * p3)
+
+# 10 node system (test for computation time)
+n = 10
+biases = bias_generator(n)
+weights = weight_generator(n)
+
+tpm_linear = tpm_linear_generator(n, biases, weights)
+
+print(tpm_linear)
