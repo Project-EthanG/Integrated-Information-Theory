@@ -59,9 +59,10 @@ def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[n
 
             prob_joint = 1.0
             for i in range(n):
-                # If the
+                # If the present state's node is 1, use the probability as per usual
                 if present_state[i] == 1:
                     prob_joint *= prob_on[i]
+                # Otherwise the complement must be used
                 else:
                     prob_joint *= (1 - prob_on[i])
 
