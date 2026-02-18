@@ -32,7 +32,7 @@ def logistic_scalar(p: float) -> float:
     return 1 / (1 + np.exp(-p))
 
 
-def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[np.float64]) -> NDArray[np.float64]:
+def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[np.float64], temp: float = 1) -> NDArray[np.float64]:
     # Generates a tpm based on pre-defined biases for each node and weights for each node's influence
 
     # Num states when there are n nodes
@@ -51,10 +51,12 @@ def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[n
         prob_on: NDArray[np.float64] = np.zeros(n)
         for i in range(n):
             # Linear output is based on biases and weights. Serves as an input for the activation fn
-            linear_output: float = biases[i] + np.dot(weights[:, i], past_state)
+            linear_output: float = biases[i] + (1 / temp) * np.dot(weights[:, i], past_state)
             prob_on[i] = logistic_scalar(linear_output)
 
         for col in range(cols):
+            # Store present state as vector. Necessary for determining if the sigmoid function output needs to be
+            # taken as a complement (i.e; the output node for the present state is OFF rather than ON)
             present_state: NDArray[np.float64] = np.array([(col >> (n - 1 - i)) & 1 for i in range(n)])
 
             prob_joint = 1.0
