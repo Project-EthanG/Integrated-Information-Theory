@@ -6,7 +6,6 @@ import random
 
 
 def generate_random_det_tpm(dim):
-
     tpm = np.zeros((dim, dim))
     for row in range(tpm.shape[1]):
         random_col = random.randint(0, dim - 1)
@@ -74,6 +73,8 @@ def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[n
 
 # Example usage
 
+'''
+
 # 3 node system with randomly generated biases and weights
 n = 3
 biases = bias_generator(n)
@@ -104,3 +105,5 @@ weights = weight_generator(n)
 tpm_linear = tpm_linear_generator(n, biases, weights)
 
 print(tpm_linear)
+
+'''

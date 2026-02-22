@@ -1,6 +1,7 @@
 import itertools
 from itertools import combinations
 import numpy as np
+from tpm_generator import generate_random_det_tpm
 
 # Define all necessary function prior to computing integrated information
 
@@ -12,7 +13,6 @@ def uniform_prior(tpm):
 def marginal_probability(X, tpm):
     # Number of states; corresponds to number of rows in tpm (or column)
     n_states = tpm.shape[0]
-    print("n_states:", n_states)
 
     # Use law of total probability: P(Xt) = sum_{Xt-1} P(Xt | Xt-1) * P(Xt-1)
     X_marg = np.empty(n_states)
@@ -108,7 +108,6 @@ def generate_bipartitions(tpm):
 def partition_pr_prior(prior, subset):
     n_partition_states = len(subset)
     n_nodes = int(np.log2(len(prior)))  # cast as int since it is coming from np
-    print("n_nodes", n_nodes)
 
     all_states = all_binary_states(n_nodes)
     subset_states = all_binary_states(n_partition_states)
@@ -163,8 +162,6 @@ def partition_pr_cond(tpm, prior, subset):
 
     # Method A) Use explicit looping
 
-    print("\nWorking through subsystem", subset, "...")
-
     # To hold joint prob dist. of subsystem
     joint_full = np.zeros((n_states, n_states), dtype=float)
 
@@ -173,8 +170,6 @@ def partition_pr_cond(tpm, prior, subset):
         # Loop through present states
         for j in range(n_states):
             joint_full[i][j] = prior[i] * tpm[i][j]
-
-    print("J =", joint_full)
 
     ## 2) Project full indices to subsystem indices ##
 
@@ -186,11 +181,10 @@ def partition_pr_cond(tpm, prior, subset):
 
     # Every permutation of states in the subsystem
     all_s_states = all_binary_states(k)
-    print(subset, " state permutations:", all_s_states)
 
     # Store the subsystem states in a dict to map to corresponding indices
 
-    # Based way to extract indices and values from the list
+    # Optimal method for extracting indices and values from the list
     s_index_mapping = {state: s for s, state in enumerate(all_s_states)}
 
     # Mapping from the full system indices to the subsystem indices
@@ -200,7 +194,6 @@ def partition_pr_cond(tpm, prior, subset):
     for n_index, full_state in enumerate(all_n_states):
         # Obtain the corresponding nodes states in the current permutation
         sub_key = tuple(full_state[k] for k in subset)
-        print("sub_key on current iteration: ", sub_key)
 
         # Store the corresponding index value for the subsystem key selected
         s_index = s_index_mapping[sub_key]
@@ -208,11 +201,7 @@ def partition_pr_cond(tpm, prior, subset):
         # Store in a list to properly order the subsystem lexicographically
         full_to_sub[n_index] = s_index
 
-    print("Map from full indices to subsystem indices:", full_to_sub)
-
-    #############################################
-    ## 3) Aggregate joint into subsystem joint ##
-    #############################################
+    # Aggregate joint into subsystem
 
     # Number of state permutations in the subsystem
     m = 2 ** k
@@ -233,13 +222,10 @@ def partition_pr_cond(tpm, prior, subset):
             # Add the values (prior already accounted for in determining the full joint)
             joint_s[u][v] += joint_full[i][j]
 
-    print("Joint prob. dist. of S: ", joint_s)
-
     ## 4) Compute marginal past from J(s) and the cond. pres. given past under the subsystem
 
     # Prior
     prior = partition_pr_prior(prior, subset)
-    print("Prior of S: ", prior)
 
     # Conditional dist.
     Q_s = np.zeros((m, m))
@@ -250,7 +236,6 @@ def partition_pr_cond(tpm, prior, subset):
             if prior[u] > 0:
                 Q_s[u][v] = joint_s[u][v] / prior[u]
 
-    print("Conditional dist. of S present given S past:", Q_s)
     return Q_s
 
 # Compute marginal entropy and conditional entropy
@@ -303,51 +288,38 @@ def max_mi_bipartition(prior, full_pres, tpm) -> tuple[float, tuple[list[int]]]:
     # Generate every possible partition. Assumed to only be bipartitions (i.e; least
     # damaging if we cut the least amount possible)
     bipartitions = generate_bipartitions(tpm)
-    print("Partitions found:", bipartitions, "\n")
 
     # We will need to store the partition with the maximum mutual information
     max_partition = tuple()
     max_mi_m1m2 = 0
 
     for m1, m2 in bipartitions:
-        print("\nCurrent partition: S_1 =", m1, "S_2 = ", m2)
         m1 = list(m1)
         m2 = list(m2)
 
         # Prior probabilities
         m1_pr_prior = partition_pr_prior(prior, m1)
         m2_pr_prior = partition_pr_prior(prior, m2)
-        print("P(S_1t-1) =", m1_pr_prior)
-        print("P(S_2t-1) =", m2_pr_prior)
 
         # Present probabilities; treated as marginal even in the multiple case
         m1_pr = partition_pr(full_pres, m1)
         m2_pr = partition_pr(full_pres, m2)
-        print("P(S_1t) =", m1_pr)
-        print("P(S_2t) =", m2_pr)
 
         # Conditional probabilities
         m1_pr_cond = partition_pr_cond(tpm, prior, m1)
-        print("P(S_1t | S_1t-1) =", m1_pr_cond)
         m2_pr_cond = partition_pr_cond(tpm, prior, m2)
-        print("P(S_2t | S_2t-1) =", m2_pr_cond)
 
         # Conditional entropies
         H_m1_m1past = partition_conditional_entropy(m1_pr_prior, m1_pr_cond)
-        print("H(S_1t | S_2t-1) =", H_m1_m1past)
         H_m2_m2past = partition_conditional_entropy(m2_pr_prior, m2_pr_cond)
-        print("H(S_2 | S_2t-1) =", H_m2_m2past)
 
         # Marginal entropies
         H_m1 = partition_marginal_entropy(m1_pr)
-        print("H(S_1) =", H_m1)
         H_m2 = partition_marginal_entropy(m2_pr)
-        print("H(S_2) =", H_m2)
 
         # Use the entropies to compute the mutual information across the partition
         mi_m1m2 = mi_across_partitions(H_m1, H_m2, H_m1_m1past, H_m2_m2past)
-        if (mi_m1m2 == 2):
-            print("On partition ", m1, m2, " we find the problem")
+
         # Find the current maximum mi across all paritions (i.e; least damaging cut)
         if mi_m1m2 > max_mi_m1m2:
             max_mi_m1m2 = mi_m1m2
@@ -361,31 +333,16 @@ def integrated_information(tpm, prior) -> tuple[float, float, tuple[list[int]] |
     # the entire network, and the maximum mutual information across each bipartition
     # to find to the integrated information
 
-    # Display the inputs (tpm and prior)
-    print("Inputted TPM: \n", tpm)
-    print("P(Xt-1) =", prior)
-
-    # Compute the marginal present probabilities for the states from the prior and tpm
+    # Compute the marginal present probabilities and joint prior and present
     full_pres = marginal_probability(prior, tpm)
-    print("P(Xt) =", full_pres)
-
-    # Compute jointly present and past states (used in conditional entropy calculation)
     X_joint = joint_prob(prior, tpm)
-    print("Joint pmf:", X_joint)
 
-    # Marginal present entropy across the whole system
+    # Marginal present entropy and entropy from pres conditional on past across the whole system
     H_full = marginal_entropy(full_pres)
-    print("H(Xt) =", H_full)
-
-    # Conditional entropy of the present state of the whole system given the past state
     H_pres_past = conditional_entropy(full_pres, tpm, X_joint)
-    print("H(Xt | Xt-1) =", H_pres_past)
 
     # Mutual information across the whole system based on the entropies
     mi_Xt_Xtpast: float = mi(H_full, H_pres_past)
-    print("MI(Xt) =", mi_Xt_Xtpast)
-
-    ## PARTITION COMPUTATIONS ##
 
     # Now we compute partitions. We need to find bi-partitions depending on the size
 
@@ -404,6 +361,3 @@ def integrated_information(tpm, prior) -> tuple[float, float, tuple[list[int]] |
     # integrated system)
     return (ii, mi_Xt_Xtpast, None,
             max_mi)
-
-
-
