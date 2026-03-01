@@ -65,8 +65,7 @@ def get_row_by_idx(idx: int) -> tuple[float, float, tuple[list[int]] | None, flo
         max_bipartition = json.loads(max_bipartition)
         return ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes
 
-# Next goal: databasing. A large number of quantities from computing integrated info
-# are going to need to be considered as estimators for the integrated information, so
-# across a large number of simulated tpms we will have a lot to store. There are two main
-# ways to do this; either storing in a file, or in a sql database
-
+def get_all_rows():
+    cur.execute("SELECT * FROM network_property")
+    rows = cur.fetchall()
+    return rows
