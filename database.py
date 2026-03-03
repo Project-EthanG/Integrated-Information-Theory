@@ -9,6 +9,7 @@ import numpy.typing as npt
 # Store the following in a db: MI, size of tpm, prior, max mi, max part
 
 con = sqlite3.connect("test.db")
+con.row_factory = sqlite3.Row
 cur = con.cursor()
 
 # Properly loading the
@@ -102,26 +103,52 @@ def get_row_by_idx(idx: int) -> tuple[float, float, tuple[list[int]] | None, flo
         return ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior
 
 
-def get_all_rows() -> list[dict]:
-    cur.execute("SELECT * FROM network_property")
-    rows = cur.fetchall()
-
-    # Still need to deserialize the json dumped predictors (MIP and prior)
-    col_names = [desc[0] for desc in cur.description]
+def get_all_rows() -> list[
+    tuple[
+        float,
+        float,
+        tuple[list[int]] | None,
+        float,
+        int,
+        npt.NDArray[np.float64]
+    ]
+]:
+    with con:
+        res = cur.execute(
+            """
+            SELECT ii, mi, max_bipartition, max_mi, num_nodes, tpm_prior
+            FROM network_property
+            """
+        )
+        rows = res.fetchall()
 
     processed_rows = []
 
     for row in rows:
-        row_dict = dict(zip(col_names, row))
-
-        # Deserialize prior
-        if row_dict.get("tpm_prior") is not None:
-            row_dict["tpm_prior"] = deserialize_prior(row_dict["tpm_prior"])
+        ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = row
 
         # Deserialize MIP
-        if row_dict.get("max_bipartition") is not None:
-            row_dict["max_bipartition"] = deserialize_bipartition(row_dict["max_bipartition"])
+        max_bipartition = (
+            deserialize_bipartition(max_bipartition)
+            if max_bipartition is not None
+            else None
+        )
 
-        processed_rows.append(row_dict)
+        # Deserialize prior
+        if tpm_prior is None:
+            raise ValueError("tpm_prior is NULL in database")
+
+        tpm_prior = deserialize_prior(tpm_prior)
+
+        processed_rows.append(
+            (
+                float(ii),
+                float(mi_Xt_Xtpast),
+                max_bipartition,
+                float(max_mi),
+                int(num_nodes),
+                tpm_prior,
+            )
+        )
 
     return processed_rows
