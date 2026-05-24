@@ -4,6 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 import random
 
+test_seed: int = 50
 
 def generate_random_det_tpm(dim):
     tpm = np.zeros((dim, dim))
@@ -14,15 +15,14 @@ def generate_random_det_tpm(dim):
 
 
 def bias_generator(n: int) -> NDArray[np.float64]:
-    # Generate biases for the TPM. One bias per node (n nodes in the system)
-    return np.random.rand(n)
+    # Generate biases for the TPM. One bias per node (n nodes in the system). Sample i.i.d from Unif(-1,1)
+    return np.random.uniform(-1, 1, n)
 
 
 def weight_generator(n: int) -> NDArray[np.float64]:
     # Generate weights for the TPM. One weight influence per node. Nodes can have weights
-    # on themselves as well, so, there are (n x n) weights. Shape is encoded in NDArray
-    # datatype, so we cannot specify it to be 2d in the functions output
-    return np.random.rand(n, n)
+    # on themselves as well, so, there are (n x n) weights. Sample i.i.d from Unif(-1, 1)
+    return np.random.uniform(-1, 1, (n, n))
 
 
 def logistic_scalar(p: float) -> float:
@@ -46,7 +46,6 @@ def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[n
     for row in range(rows):
         # Store the state as a vector. Needed to compute the linear term
         past_state: NDArray[np.float64] = np.array([(row >> (n - 1 - i)) & 1 for i in range(n)])
-
         prob_on: NDArray[np.float64] = np.zeros(n)
         for i in range(n):
             # Linear output is based on biases and weights. Serves as an input for the activation fn
@@ -54,7 +53,8 @@ def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[n
             prob_on[i] = logistic_scalar(linear_output)
 
         for col in range(cols):
-            # Store present state as vector. Necessary for determining if the sigmoid function output needs to be
+            # Store present state as vector depending on indices (assumed lexicographic).
+            # Necessary for determining if the sigmoid function output needs to be
             # taken as a complement (i.e; the output node for the present state is OFF rather than ON)
             present_state: NDArray[np.float64] = np.array([(col >> (n - 1 - i)) & 1 for i in range(n)])
 
@@ -69,41 +69,3 @@ def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[n
 
             tpm_linearly_generated[row, col] = prob_joint
     return tpm_linearly_generated
-
-
-# Example usage
-
-'''
-
-# 3 node system with randomly generated biases and weights
-n = 3
-biases = bias_generator(n)
-weights = weight_generator(n)
-
-tpm_linear = tpm_linear_generator(n, biases, weights)
-
-print(tpm_linear)
-
-# 3 node system with specified weights and biases
-n = 3
-biases = np.array([0.1,0.2,0.9])
-weights = np.array([[0.2,0,0],[0.3,0,0.5],[0.4,0.7,0.05]])
-tpm_linear = tpm_linear_generator(n, biases, weights)
-print(tpm_linear[1][5])
-
-# Compare to "manual" calculations
-p1 = logistic_scalar(0.1 + 0.2*1 + 0.3*0 + 0.4*1)
-p2 = logistic_scalar(0.2 + 0*1 + 0*0 + 0.7*1)
-p3 = logistic_scalar(0.9 + 0*1 + 0.5*0 + 0.05*1)
-print(p1 * (1-p2) * p3)
-
-# 10 node system (test for computation time)
-n = 10
-biases = bias_generator(n)
-weights = weight_generator(n)
-
-tpm_linear = tpm_linear_generator(n, biases, weights)
-
-print(tpm_linear)
-
-'''

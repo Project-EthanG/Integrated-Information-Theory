@@ -1,4 +1,4 @@
-from tpm_generator import tpm_linear_generator, bias_generator, weight_generator
+from tpm_generator import tpm_linear_generator, bias_generator, weight_generator, generate_random_det_tpm
 import iit_computation
 import numpy as np
 import numpy.typing as npt
@@ -8,10 +8,9 @@ import ast
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
-
-# Need to make sure the computation time is still tractable
 import time
+
+test_seed: int = 50
 
 start_total = time.perf_counter()
 
@@ -20,7 +19,7 @@ def generate_toyset(n: int, num_tpms: int):
     # Monitor computational cost
     tpm_gen_start_time = time.perf_counter()
 
-    # Stores ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes
+    # Stores ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, prior
     network_properties: list[tuple[float, float, tuple[list[int]] | None, float, int, npt.NDArray[np.float64]]] = []
     node_shape: tuple[int, int] = (n, n)
     biases = np.zeros((num_tpms, n), dtype=float)
@@ -67,10 +66,12 @@ drop_db()
 create_db()
 
 
+
 # Generate a toyset (let's just do 1000 6 node systems for now for testing computation time)
-n = 6
-num_tpms = 1000
+n: int = 6
+num_tpms: int = 100
 generate_toyset(n, num_tpms)
+
 
 # Flatten the data to feed into the NN
 def flatten_predictors(row_slice):
@@ -89,21 +90,38 @@ def flatten_predictors(row_slice):
             flat.append(val)
     return flat
 
-rows = get_all_rows()
+# Stores all the db entries. For code sanitation this intermediary array should not be necessary.
+# FUTURE FEATURE IMPLEMENTATION REQUIRED
+rows: list[tuple[float,float,tuple[list[int]] | None,float,int,npt.NDArray[np.float64]]] = get_all_rows()
 
+first_col = [row[0] for row in rows]
+print(first_col)
+# The current design matrix considers the following parameters (all but ii in db):
+#   I(Xt;Xt-1)
+#   MIP
+#   I*(Xt;Xt-1) imposed by MIP
+#   num_nodes
+#   tpm_prior
+
+# However in reality, the goal is to reduce computation, so prediction should occur independent
+# of any computationally taxing calculation. This means MIP and I*(Xt; Xt-1) are not realistic features
+
+# Iterating through the db as indices for now, but this should be specified by feature name. FUTURE FEATURE IMPLEMENTATION REQUIRED
+feature_cols = [1, 4, 5]
 y = np.array([row[0] for row in rows], dtype=np.float32)
-X = np.array([flatten_predictors(row[1:]) for row in rows], dtype=np.float32)
+X = np.array([flatten_predictors([row[i] for i in feature_cols]) for row in rows], dtype=np.float32)
 
-# Make the split. For now we will use 80-20-20
+
+# Make the split. For now we will use 40-30-30
 X_train, X_temp, y_train, y_temp = train_test_split(
-    X, y, test_size=0.2, random_state=50
+    X, y, test_size=0.6, random_state=test_seed
 )
 
 X_val, X_test, y_val, y_test = train_test_split(
-    X_temp, y_temp, test_size=0.5, random_state=50
+    X_temp, y_temp, test_size=0.5, random_state=test_seed
 )
 
-# Will use tensors for the NN. It needs to handle the data correctly
+# Will use tensors for the NN
 
 X_train_t = torch.tensor(X_train, dtype=torch.float32)
 y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
@@ -142,7 +160,7 @@ model = SimpleFFNN(input_dim=X.shape[1], hidden_dims=[32, 16], output_dim=1)
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-epochs = 75
+epochs = 100
 
 for epoch in range(epochs):
     model.train()
@@ -181,14 +199,6 @@ with torch.no_grad():
 print("Finished testing!\n")
 
 print("Test MSE:", test_loss.item())
-
-
-'''
-# Analyze the DB (only for testing correct databasing)
-for i in range(10):
-    # Matrices are 0 indexed, dbs are 1 indexed
-    print(get_row_by_idx(i+1))
-'''
 
 close_db()
 
