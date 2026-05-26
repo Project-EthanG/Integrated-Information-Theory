@@ -6,75 +6,75 @@ import numpy as np
 import numpy.typing as npt
 
 
-# Store the following in a db: MI, size of tpm, prior, max mi, max part
-
 con = sqlite3.connect("test.db")
 con.row_factory = sqlite3.Row
 cur = con.cursor()
 
-# Properly loading the
+
 def deserialize_prior(text: str) -> npt.NDArray[np.float64]:
     return np.array(json.loads(text), dtype=np.float64)
+
+
+def deserialize_tpm(text: str) -> npt.NDArray[np.float64]:
+    return np.array(json.loads(text), dtype=np.float64)
+
 
 def deserialize_bipartition(text: str) -> tuple[list[int]]:
     return tuple(json.loads(text))
 
+
 def create_db():
     cur.execute('''CREATE TABLE IF NOT EXISTS network_property
                    (
-                       idx
-                       INTEGER
-                       PRIMARY
-                       KEY
-                       AUTOINCREMENT,
-                       ii
-                       REAL,
-                       mi
-                       REAL,
-                       max_bipartition
-                       TEXT,
-                       max_mi
-                       REAL,
-                       num_nodes
-                       INTEGER,
-                       tpm_prior
-                       TEXT
+                       idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                       tpm TEXT,
+                       ii REAL,
+                       mi REAL,
+                       max_bipartition TEXT,
+                       max_mi REAL,
+                       num_nodes INTEGER,
+                       tpm_prior TEXT
                    )
                 ''')
+
 
 def close_db():
     con.close()
 
+
 def drop_db():
     cur.execute('''DROP TABLE IF EXISTS network_property''')
 
-def write_to_db(network_properties: list[tuple[float, float, tuple[list[int]] | None, float, int, npt.NDArray[np.float64]]]) -> None:
-    network_properties_db: list[tuple[float, float, str, float, int, str]] = []
+
+def write_to_db(network_properties: list[tuple[npt.NDArray[np.float64], float, float, tuple[list[int]] | None, float, int, npt.NDArray[np.float64]]]) -> None:
+    network_properties_db: list[tuple[str, float, float, str, float, int, str]] = []
     for property in network_properties:
-        ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = property
+        tpm, ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = property
+        # FIX 1: serialize TPM to JSON string
+        tpm_serialized = json.dumps(tpm.tolist())
         max_bipartition = json.dumps(max_bipartition)
-        # JSON serialization does not work with non-native (i.e; NDArray) datatype so we need to cast to a list first
         tpm_prior = json.dumps(tpm_prior.tolist())
-        network_properties_db.append((ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior))
+        network_properties_db.append((tpm_serialized, ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior))
 
     with con:
         cur.executemany('''
-                        INSERT INTO network_property (ii,
+            INSERT INTO network_property (
+                tpm, ii,
                 mi,
                 max_bipartition,
-               max_mi,
-               num_nodes,
+                max_mi,
+                num_nodes,
                 tpm_prior)
-                        VALUES (?, ?, ?, ?, ?, ?)''', network_properties_db)
+            VALUES (?, ?, ?, ?, ?, ?, ?)''', network_properties_db)
         con.commit()
 
 
-def get_row_by_idx(idx: int) -> tuple[float, float, tuple[list[int]] | None, float, int, npt.NDArray[np.float64]] | None:
+def get_row_by_idx(idx: int) -> tuple[npt.NDArray[np.float64], float, float, tuple[list[int]] | None, float, int, npt.NDArray[np.float64]] | None:
 
     with con:
         res = cur.execute(
             '''
-            SELECT ii, mi, max_bipartition, max_mi, num_nodes, tpm_prior
+            SELECT tpm, ii, mi, max_bipartition, max_mi, num_nodes, tpm_prior
             FROM network_property
             WHERE idx = ?
             ''',
@@ -86,25 +86,29 @@ def get_row_by_idx(idx: int) -> tuple[float, float, tuple[list[int]] | None, flo
         if row is None:
             return None
 
-        ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = row
+        tpm, ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = row
 
-        # Deserialize MIP ONLY when it is an actual list (otherwise return None as it is stored in DB)
         max_bipartition = (
             deserialize_bipartition(max_bipartition)
             if max_bipartition is not None
             else None
         )
 
-        # Deserialize prior
         if tpm_prior is None:
             raise ValueError("tpm_prior is NULL in database")
         tpm_prior = deserialize_prior(tpm_prior)
 
-        return ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior
+        # FIX 2: deserialize TPM into its own variable
+        if tpm is None:
+            raise ValueError("tpm is NULL in database")
+        tpm = deserialize_tpm(tpm)
+
+        return tpm, ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior
 
 
 def get_all_rows() -> list[
     tuple[
+        npt.NDArray[np.float64],
         float,
         float,
         tuple[list[int]] | None,
@@ -116,7 +120,7 @@ def get_all_rows() -> list[
     with con:
         res = cur.execute(
             """
-            SELECT ii, mi, max_bipartition, max_mi, num_nodes, tpm_prior
+            SELECT tpm, ii, mi, max_bipartition, max_mi, num_nodes, tpm_prior
             FROM network_property
             """
         )
@@ -125,23 +129,26 @@ def get_all_rows() -> list[
     processed_rows = []
 
     for row in rows:
-        ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = row
+        tpm, ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = row
 
-        # Deserialize MIP
         max_bipartition = (
             deserialize_bipartition(max_bipartition)
             if max_bipartition is not None
             else None
         )
 
-        # Deserialize prior
         if tpm_prior is None:
             raise ValueError("tpm_prior is NULL in database")
-
         tpm_prior = deserialize_prior(tpm_prior)
+
+        # FIX 3: deserialize TPM into its own variable
+        if tpm is None:
+            raise ValueError("tpm is NULL in database")
+        tpm = deserialize_tpm(tpm)
 
         processed_rows.append(
             (
+                tpm,
                 float(ii),
                 float(mi_Xt_Xtpast),
                 max_bipartition,

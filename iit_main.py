@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import time
+from torch.utils.data import TensorDataset, DataLoader
 
 test_seed: int = 50
 
@@ -43,7 +44,7 @@ def generate_toyset(n: int, num_tpms: int):
 
         # Append to list for db data entry
         ii, mi_Xt_Xtpast, max_bipartition, max_mi = iit_computation.integrated_information(tpms_linear[i], priors[i])
-        network_properties.append((ii, mi_Xt_Xtpast, max_bipartition, max_mi, n, priors[i]))
+        network_properties.append((tpms_linear[i], ii, mi_Xt_Xtpast, max_bipartition, max_mi, n, priors[i]))
         print(
             f"Finished generating TPM number {i + 1} and computing its integrated information. Writing to database...")
 
@@ -94,8 +95,6 @@ def flatten_predictors(row_slice):
 # FUTURE FEATURE IMPLEMENTATION REQUIRED
 rows: list[tuple[float,float,tuple[list[int]] | None,float,int,npt.NDArray[np.float64]]] = get_all_rows()
 
-first_col = [row[0] for row in rows]
-print(first_col)
 # The current design matrix considers the following parameters (all but ii in db):
 #   I(Xt;Xt-1)
 #   MIP
@@ -107,8 +106,8 @@ print(first_col)
 # of any computationally taxing calculation. This means MIP and I*(Xt; Xt-1) are not realistic features
 
 # Iterating through the db as indices for now, but this should be specified by feature name. FUTURE FEATURE IMPLEMENTATION REQUIRED
-feature_cols = [1, 4, 5]
-y = np.array([row[0] for row in rows], dtype=np.float32)
+feature_cols = [0, 2, 5, 6]
+y = np.array([row[1] for row in rows], dtype=np.float32)
 X = np.array([flatten_predictors([row[i] for i in feature_cols]) for row in rows], dtype=np.float32)
 
 
@@ -134,6 +133,17 @@ y_test_t = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
 
 # Monitor computation time for training the NN
 train_start_time = time.perf_counter()
+
+rows = get_all_rows()
+for i, row in enumerate(rows[:3]):
+    tpm, ii, mi, max_bipartition, max_mi, num_nodes, tpm_prior = row
+    print(f"Row {i}: tpm.shape={tpm.shape}, tpm_prior.shape={tpm_prior.shape}, num_nodes={num_nodes}")
+print(f"X_train_t.shape: {X_train_t.shape}, y_train_t.shape: {y_train_t.shape}")
+train_dataset = TensorDataset(X_train_t, y_train_t)
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+
+
+
 
 # The neural network. Feed forward for now. The number of hidden layers is specified when making the SimpleFFNN object
 class SimpleFFNN(nn.Module):
@@ -164,17 +174,19 @@ epochs = 100
 
 for epoch in range(epochs):
     model.train()
+    train_loss_accum = 0.0
 
-    # Clear gradients on next BP
-    optimizer.zero_grad()
-    y_pred = model(X_train_t)
-    train_loss = criterion(y_pred, y_train_t)
+    for X_batch, y_batch in train_loader:
+        optimizer.zero_grad()
+        y_pred = model(X_batch)
+        loss = criterion(y_pred, y_batch)
+        loss.backward()
+        optimizer.step()
+        train_loss_accum += loss.item()
 
-    # Back propogate
-    train_loss.backward()
-    optimizer.step()
+    avg_train_loss = train_loss_accum / len(train_loader)
 
-    # Validation
+    # Validation (full pass, no batching needed)
     model.eval()
     with torch.no_grad():
         val_pred = model(X_val_t)
@@ -182,7 +194,7 @@ for epoch in range(epochs):
 
     if epoch % 20 == 0:
         print(f"Epoch {epoch:3d} | "
-              f"Train Loss: {train_loss.item():.6f} | "
+              f"Train Loss: {avg_train_loss:.6f} | "
               f"Val Loss: {val_loss.item():.6f}")
 
 train_end_time: float = time.perf_counter()
@@ -204,5 +216,8 @@ close_db()
 
 end_total = time.perf_counter()
 print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
+
+
+# feature: add TPM as a feature for the FFNN, update in main and databasing.
 
 
