@@ -1,5 +1,3 @@
-#import iit_computation
-#import tpm_generator
 import sqlite3
 import json
 import numpy as np
@@ -23,26 +21,26 @@ def deserialize_bipartition(text: str) -> tuple[list[int]]:
     return tuple(json.loads(text))
 
 
-def create_db():
-    cur.execute('''CREATE TABLE IF NOT EXISTS network_property
-                   (
-                       idx INTEGER PRIMARY KEY AUTOINCREMENT,
-                       tpm TEXT,
-                       ii REAL,
-                       mi REAL,
-                       max_bipartition TEXT,
-                       max_mi REAL,
-                       num_nodes INTEGER,
-                       tpm_prior TEXT
-                   )
-                ''')
+def create_db() -> None:
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS network_property(
+               idx INTEGER PRIMARY KEY AUTOINCREMENT,
+               tpm TEXT,
+               ii REAL,
+               mi REAL,
+               max_bipartition TEXT,
+               max_mi REAL,
+               num_nodes INTEGER,
+               tpm_prior TEXT
+            )
+        ''')
 
 
-def close_db():
+def close_db() -> None:
     con.close()
 
 
-def drop_db():
+def drop_db() -> None:
     cur.execute('''DROP TABLE IF EXISTS network_property''')
 
 
@@ -50,22 +48,21 @@ def write_to_db(network_properties: list[tuple[npt.NDArray[np.float64], float, f
     network_properties_db: list[tuple[str, float, float, str, float, int, str]] = []
     for property in network_properties:
         tpm, ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = property
-        # FIX 1: serialize TPM to JSON string
         tpm_serialized = json.dumps(tpm.tolist())
         max_bipartition = json.dumps(max_bipartition)
         tpm_prior = json.dumps(tpm_prior.tolist())
         network_properties_db.append((tpm_serialized, ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior))
 
     with con:
-        cur.executemany('''
+        cur.executemany(
+            '''
             INSERT INTO network_property (
-                tpm, ii,
-                mi,
-                max_bipartition,
-                max_mi,
-                num_nodes,
-                tpm_prior)
-            VALUES (?, ?, ?, ?, ?, ?, ?)''', network_properties_db)
+                tpm, ii, mi, max_bipartition, max_mi, num_nodes, tpm_prior
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''',
+            network_properties_db
+        )
         con.commit()
 
 
@@ -98,7 +95,6 @@ def get_row_by_idx(idx: int) -> tuple[npt.NDArray[np.float64], float, float, tup
             raise ValueError("tpm_prior is NULL in database")
         tpm_prior = deserialize_prior(tpm_prior)
 
-        # FIX 2: deserialize TPM into its own variable
         if tpm is None:
             raise ValueError("tpm is NULL in database")
         tpm = deserialize_tpm(tpm)
@@ -141,7 +137,6 @@ def get_all_rows() -> list[
             raise ValueError("tpm_prior is NULL in database")
         tpm_prior = deserialize_prior(tpm_prior)
 
-        # FIX 3: deserialize TPM into its own variable
         if tpm is None:
             raise ValueError("tpm is NULL in database")
         tpm = deserialize_tpm(tpm)
