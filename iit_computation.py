@@ -277,14 +277,6 @@ def mi_across_partitions(H_m1, H_m2, H_m1_m1past, H_m2_m2past):
 
 
 def max_mi_bipartition(prior, full_pres, tpm) -> tuple[float, tuple[list[int]]]:
-    # Need the number of states and corresponding "nodes" (how many neurons can we
-    # separate?)
-    n_states = tpm.shape[0]
-
-    # Number of nodes. Log base needs to change depending on the number of states
-    # each node can have
-    n_nodes: int = int(np.log2(n_states))
-
     # Generate every possible partition. Assumed to only be bipartitions (i.e; least
     # damaging if we cut the least amount possible)
     bipartitions = generate_bipartitions(tpm)
