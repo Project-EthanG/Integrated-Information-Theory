@@ -44,10 +44,18 @@ def drop_db() -> None:
     cur.execute('''DROP TABLE IF EXISTS network_property''')
 
 
-def write_to_db(network_properties: list[tuple[npt.NDArray[np.float64], float, float, tuple[list[int]] | None, float, int, npt.NDArray[np.float64]]]) -> None:
+def write_to_db(
+        network_properties: list[tuple[npt.NDArray[np.float64],
+        float,
+        float,
+        tuple[list[int]] | None,
+        float,
+        int,
+        npt.NDArray[np.float64]]]
+    ) -> None:
     network_properties_db: list[tuple[str, float, float, str, float, int, str]] = []
-    for property in network_properties:
-        tpm, ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = property
+    for network_property in network_properties:
+        tpm, ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, tpm_prior = network_property
         tpm_serialized = json.dumps(tpm.tolist())
         max_bipartition = json.dumps(max_bipartition)
         tpm_prior = json.dumps(tpm_prior.tolist())
