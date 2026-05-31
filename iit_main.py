@@ -2,9 +2,8 @@ from tpm_generator import tpm_linear_generator, bias_generator, weight_generator
 import iit_computation
 import numpy as np
 import numpy.typing as npt
-from database import write_to_db, get_row_by_idx, close_db, drop_db, create_db, get_all_rows
+from database import write_to_db, close_db, drop_db, create_db, get_all_rows
 from sklearn.model_selection import train_test_split
-import ast
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -126,8 +125,6 @@ def define_features(feature_cols: list[int]):
     X = np.array([flatten_predictors([row[i] for i in feature_cols]) for row in rows], dtype=np.float32)
 
     return X, y
-
-
 
 
 def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: float = 0.3):
