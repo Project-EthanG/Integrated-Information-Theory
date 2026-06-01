@@ -8,9 +8,8 @@ test_seed: int = 50
 
 def generate_random_det_tpm(dim):
     tpm = np.zeros((dim, dim))
-    for row in range(tpm.shape[1]):
-        random_col = random.randint(0, dim - 1)
-        tpm[row][random_col] = 1
+    cols = np.random.randint(0, dim, size=dim)
+    tpm[np.arange(dim), cols] = 1
     return tpm
 
 
