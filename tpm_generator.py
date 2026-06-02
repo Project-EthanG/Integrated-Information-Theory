@@ -6,7 +6,7 @@ import random
 
 test_seed: int = 50
 
-def generate_random_det_tpm(dim):
+def generate_random_det_tpm(dim) -> NDArray[np.float64]:
     tpm = np.zeros((dim, dim))
     cols = np.random.randint(0, dim, size=dim)
     tpm[np.arange(dim), cols] = 1
