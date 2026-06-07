@@ -1,7 +1,8 @@
 import itertools
 from itertools import combinations
 import numpy as np
-from tpm_generator import generate_random_det_tpm
+from scipy.special import xlogy
+
 
 # Define all necessary function prior to computing integrated information
 
@@ -11,59 +12,20 @@ def uniform_prior(tpm):
 
 
 def marginal_probability(X, tpm):
-    # Number of states; corresponds to number of rows in tpm (or column)
-    n_states = tpm.shape[0]
-
-    # Use law of total probability: P(Xt) = sum_{Xt-1} P(Xt | Xt-1) * P(Xt-1)
-    X_marg = np.empty(n_states)
-    for pres_state in range(n_states):
-        # Iteratively add to each marginal present state probability
-        X_marg[pres_state] = 0
-        for past_state in range(n_states):
-            X_marg[pres_state] += tpm[past_state][pres_state] * X[past_state]
-
-    return X_marg
+    return tpm.T @ X
 
 
 # Compute the mutual information (no partition)
 def marginal_entropy(X):
-    # Number of states (rows)
-    n_states = X.shape[0]
-
-    H = 0
-    for pres_state in range(n_states):
-        # No change to entropy if we get the 0 * log(0) case (no uncertainty if nothing
-        # ever happens). Normally this is undefined, but we treat it as 0 in IIT.
-        # Otherwise compute shannon entropy as normal. Use log2 only if there are two
-        # states per node, otherwise adjust accordingly
-
-        if X[pres_state] > 0:
-            H -= X[pres_state] * np.log2(X[pres_state])
-    return H
+    return -np.sum(xlogy(X, X)) / np.log(2)
 
 
 def joint_prob(X, tpm):
-    n = len(X)
-    p_joint = np.empty((n, n))
-    # Through marginal states (i.e; past states)
-    for i in range(n):
-        # Through other (i.e; present states)
-        for j in range(n):
-            p_joint[i][j] = X[i] * tpm[i][j]
-    return p_joint
+    return X[:, None] * tpm
 
 
 def conditional_entropy(X, tpm, jointX):
-    H = 0
-    n = len(X)
-    # Iterate through past states
-    for i in range(n):
-        # Iterate through present states
-        for j in range(n):
-            # No changes under 0 log(0) case
-            if X[j] > 0 and tpm[i][j] > 0:
-                H -= jointX[i, j] * np.log2(tpm[i][j])
-    return H
+    return -np.sum(xlogy(jointX, tpm)) / np.log(2)
 
 
 def mi(H_full, H_pres_past):
@@ -104,46 +66,28 @@ def generate_bipartitions(tpm):
     return bipartitions
 
 
-# Need to find the subset priors first
 def partition_pr_prior(prior, subset):
-    n_partition_states = len(subset)
-    n_nodes = int(np.log2(len(prior)))  # cast as int since it is coming from np
+    n_nodes = int(np.log2(len(prior)))
 
-    all_states = all_binary_states(n_nodes)
-    subset_states = all_binary_states(n_partition_states)
+    # Reshape flat distribution into n-dimensional tensor (one axis per node)
+    prior_tensor = np.asarray(prior).reshape([2] * n_nodes)
 
-    # Accumulates across permutations so initialize to 0
-    prior_probs = {s: 0.0 for s in subset_states}
+    # Sum over all axes not in subset
+    axes_to_sum = tuple(i for i in range(n_nodes) if i not in subset)
+    marginal = prior_tensor.sum(axis=axes_to_sum)
 
-    # Loop through each node within the corresponding prior. This is used to
-    # accumulate node by node
-    for state, state_pr_prior in zip(all_states, prior):
-        # Store the "node"th element of the current permutation as a key. This
-        # key is used to know which probability to "increment" each time it is
-        # found in a new permutation. In the 1 node partition case, the only
-        # possible keys are 0 and 1, so for the 3 node network, there are 8
-        # permutations, with 4 having "key" 0, so they add 1/8 four times to get
-        # P(m1 = 0) = 1/2. It does the same for "key" 1.
-        key = tuple(state[i] for i in subset)
-        prior_probs[key] += state_pr_prior
-    return list(prior_probs.values())
+    return marginal.flatten().tolist()
 
 
 # Compute marginal present probabilities in a similar manner to the prior for the
 # partition
 def partition_pr(full_pres, subset):
     n_nodes = int(np.log2(len(full_pres)))
-    n_partition_states = len(subset)
 
-    all_states = all_binary_states(n_nodes)
-    subset_states = all_binary_states(n_partition_states)
+    pres_tensor = np.asarray(full_pres).reshape([2] * n_nodes)
+    axes_to_sum = tuple(i for i in range(n_nodes) if i not in subset)
 
-    probs = {s: 0.0 for s in subset_states}
-    for state, state_pr in zip(all_states, full_pres):
-        key = tuple(state[i] for i in subset)
-        probs[key] += state_pr
-
-    return list(probs.values())
+    return pres_tensor.sum(axis=axes_to_sum).flatten().tolist()
 
 
 def partition_pr_cond(tpm, prior, subset):
@@ -245,16 +189,15 @@ def partition_conditional_entropy(s_prior, s_pr_cond):
     #   s_pr_cond: cpd for present probabilities conditioned on prior
 
     # Outputs:
-    #   H (float): conditional entropy of the system
-    H = 0.0
-    k = len(s_prior)
-    n = len(s_pr_cond[0])
-    for i in range(k):
-        for j in range(n):
-            if s_pr_cond[i][j] > 0 and s_prior[i] > 0:
-                H -= (s_prior[i] * s_pr_cond[i][j]
-                      * np.log2(s_pr_cond[i][j]))
-    return H
+    #   float: conditional entropy of the system
+    prior = np.asarray(s_prior)
+    cond = np.asarray(s_pr_cond)
+
+    # Mask zeros to avoid log(0) computation (set any probability with the log(0) to 0)
+    mask = (cond > 0) & (prior[:, None] > 0)
+    log_cond = np.where(mask, np.log2(cond, where=mask, out=np.zeros_like(cond)), 0)
+
+    return -np.sum(prior[:, None] * cond * log_cond)
 
 
 def partition_marginal_entropy(s_pr):
