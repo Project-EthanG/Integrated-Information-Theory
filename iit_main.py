@@ -9,6 +9,8 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 from torch.utils.data import TensorDataset, DataLoader
+import copy
+
 
 test_seed: int = 50
 
@@ -77,7 +79,7 @@ def generate_toyset(n: int, num_tpms: int):
         print(f"\nComplete! Finished processing {num_tpms} tpms in {int(total_tpm_time / 60)} "
               f"minutes and {total_tpm_time % 60:.4f} seconds")
     else:
-        print(f"\nComplete! Finished processing {num_tpms} tpms in {total_tpm_time} seconds")
+        print(f"\nComplete! Finished processing {num_tpms} tpms in {total_tpm_time:.4f} seconds")
 
 
 def gen_and_write_to_db(n: int = 4, num_tpms: int = 100) -> None:
@@ -113,7 +115,7 @@ def flatten_predictors(row_slice):
 
 
 # COMMENT if the dataset already exists. UNCOMMENT if we need to generate a new dataset
-#gen_and_write_to_db(n=6, num_tpms=1000)
+#gen_and_write_to_db(n=6, num_tpms=20_000)
 
 
 # Stores all the db entries. For code sanitation this intermediary array should not be necessary.
@@ -129,11 +131,9 @@ def define_features(feature_cols: list[int]):
 
 def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: float = 0.3):
 
-
     if prop_train+prop_test+prop_val != 1:
         raise ValueError("Invalid train-test-validation split")
 
-    # Define train. Test size is made up of anything that is not train
     X_train, X_temp, y_train, y_temp = train_test_split(
         X, y, test_size=1-prop_train, random_state=test_seed
     )
@@ -141,8 +141,6 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     X_val, X_test, y_val, y_test = train_test_split(
         X_temp, y_temp, test_size=0.5, random_state=test_seed
     )
-
-    # Will use tensors for the NN
 
     X_train_t = torch.tensor(X_train, dtype=torch.float32)
     y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
@@ -153,7 +151,6 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     X_test_t = torch.tensor(X_test, dtype=torch.float32)
     y_test_t = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
 
-    # Monitor computation time for training the NN
     train_start_time = time.perf_counter()
 
     print("Beginning training the neural net...\n")
@@ -167,9 +164,14 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), weight_decay=1e-4, lr=0.001)
 
-    epochs = 100
+    best_val_loss = float('inf')
+    best_model_weights = None
+    patience = 10
+    epochs_no_improve = 0
+    val_threshold = 1e-6
+    max_epochs = 500
 
-    for epoch in range(epochs):
+    for epoch in range(max_epochs):
         model.train()
         train_loss_accum = 0.0
 
@@ -183,37 +185,35 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
 
         avg_train_loss = train_loss_accum / len(train_loader)
 
-        # Validation (full pass, no batching needed)
         model.eval()
         with torch.no_grad():
             val_pred = model(X_val_t)
-            val_loss = criterion(val_pred, y_val_t)
+            val_loss = criterion(val_pred, y_val_t).item()
 
-        if epoch % 20 == 0:
-            print(f"Epoch {epoch:3d} | "
-                  f"Train Loss: {avg_train_loss:.6f} | "
-                  f"Val Loss: {val_loss.item():.6f}")
+        if val_loss < best_val_loss - val_threshold:
+            best_val_loss = val_loss
+            best_model_weights = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+            print(f"New best model saved at epoch {epoch}")
+            print(f"Epoch {epoch:3d} | Train Loss: {avg_train_loss:.4e} | Val Loss: {val_loss:.4e}")
 
-    train_end_time: float = time.perf_counter()
-    total_train_time: float = train_end_time - train_start_time
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(f"\nEarly stopping at epoch {epoch} — no improvement for {patience} consecutive epochs.")
+                break
 
-    print(f"\nFinished training the neural net! Time taken: {total_train_time:.2f} seconds.")
+    if best_model_weights is not None:
+        model.load_state_dict(best_model_weights)
+        print(f"\nRestored best model weights (val_loss={best_val_loss:.4e})")
 
-    print("\nBeginning testing the neural net...:")
-
-    test_start_time: float = time.perf_counter()
-
+    # Compute test loss against the restored best weights
     model.eval()
     with torch.no_grad():
         test_pred = model(X_test_t)
         test_loss = criterion(test_pred, y_test_t)
 
-    test_end_time: float = time.perf_counter()
-    total_test_time: float = test_end_time - test_start_time
-
-    print(f"\nFinished testing the neural net! Time taken: {total_test_time:.2f} seconds.")
-
-    print("\nTest MSE:", test_loss.item())
+    print("\nTest MSE:", f"{test_loss.item():.4e}")
 
 # The current indices are:
 
@@ -230,22 +230,31 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
 
 # Start with just feeding the TPM, number of units and prior. Regularization should only allow for the TPM to be a relevant
 # feature (no. units and prior is constant across both training and testing)
+print(f"Defining features...")
 X_raw, y_raw = define_features([0, 5, 6])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 # Let's now compare to just the mutual information for the full system with the no. units and prior
+print(f"Defining features...")
 X_raw, y_raw = define_features([2, 5, 6])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 # Compare now to using both
+print(f"Defining features...")
 X_raw, y_raw = define_features([0, 2, 5, 6])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 # What if we ONLY use the TPM?
+print(f"Defining features...")
 X_raw, y_raw = define_features([0])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
-# The best performing in terms of test MSE was just the mutual information
+# What if we ONLY use the MI?
+print(f"Defining features...")
+X_raw, y_raw = define_features([2])
+fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
+
+
 
 ## FUTURE FEATURE IMPLEMENTATION REQUIRED ##
 
