@@ -228,36 +228,60 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
 # Let's compare how the FFNN performs when fed just the TPM vs. just the mutual information for the full system. Number
 # of units and prior are currently fixed, so they do not have any influence as predictors
 
-# Start with just feeding the TPM, number of units and prior. Regularization should only allow for the TPM to be a relevant
-# feature (no. units and prior is constant across both training and testing)
+# Model 1: TPM, prior and no. nodes
 print(f"Defining features...")
 X_raw, y_raw = define_features([0, 5, 6])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
-# Let's now compare to just the mutual information for the full system with the no. units and prior
+# Model 2: MI, prior and no. nodes
 print(f"Defining features...")
 X_raw, y_raw = define_features([2, 5, 6])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
-# Compare now to using both
+# Model 3: TPM, MI, prior and no. nodes
 print(f"Defining features...")
 X_raw, y_raw = define_features([0, 2, 5, 6])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
-# What if we ONLY use the TPM?
+# Model 4: TPM
 print(f"Defining features...")
 X_raw, y_raw = define_features([0])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
-# What if we ONLY use the MI?
+# Model 5: MI
 print(f"Defining features...")
 X_raw, y_raw = define_features([2])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 
+'''
+Current results:
 
-## FUTURE FEATURE IMPLEMENTATION REQUIRED ##
+Batch 1 (n=1_000 but no validation)
 
+Test MSE:
+
+
+Batch 2 (n=20_000 but no validation)
+
+Test MSE:
+Model 1: 0.000386078
+Model 2: 0.000209664
+Model 3: 0.000238302
+Model 4: 0.000384595
+Model 5: 0.000208751
+
+
+Batch 3 (n=20_000 and validation)
+
+Test MSE:
+Model 1: 0.00038639
+Model 2: 0.00021075
+Model 3: 0.00025522
+Model 4: 0.00040049
+Model 5: 0.00020711
+
+'''
 
 close_db()
 
