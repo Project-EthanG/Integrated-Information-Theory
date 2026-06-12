@@ -257,12 +257,37 @@ fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 '''
 Current results:
 
-Batch 1 (n=1_000 but no validation)
+Model 1: TPM + no. units + prior
+Model 2: MI + no. units + prior
+Model 3: TPM + MI + no. units + prior
+Model 4: TPM
+Model 5: MI
+
+Batch 1 (n=1_000 but no validation. Train for 100 epochs no matter what)
+
+Train MSE:
+Model 1: 0.000132
+Model 2: 0.000208
+Model 3: 0.000129
+Model 4: 0.000067
+Model 5: 0.000198
 
 Test MSE:
+Model 1: 0.0004475
+Model 2: 0.0002220
+Model 3: 0.0003407
+Model 4: 0.0004980
+Model 5: 0.0001864
 
 
-Batch 2 (n=20_000 but no validation)
+Batch 2 (n=20_000 but no validation. Train for 100 epochs no matter what)
+
+Train MSE:
+Model 1: 0.000388
+Model 2: 0.000217
+Model 3: 0.000246
+Model 4: 0.000389
+Model 5: 0.000214
 
 Test MSE:
 Model 1: 0.000386078
@@ -272,7 +297,14 @@ Model 4: 0.000384595
 Model 5: 0.000208751
 
 
-Batch 3 (n=20_000 and validation)
+Batch 3 (n=20_000 and validation. Stop training after 10 epochs of little improvement)
+
+Train MSE: 
+Model 1: 0.00040090
+Model 2: 0.00022285
+Model 3: 0.00026617
+Model 4: 0.00110660 
+Model 5: 0.00021159 
 
 Test MSE:
 Model 1: 0.00038639
@@ -281,9 +313,25 @@ Model 3: 0.00025522
 Model 4: 0.00040049
 Model 5: 0.00020711
 
+General observations:
+-> Increasing observations seemed to help
+-> Validation process is certainly causing further overfitting
+-> Not having MI in the feature space adds quite a bit of MSE
+-> Shrinkage of prior and no. nodes is not being sufficiently shrunk - some MSE leakage
+
+Considerations for next week:
+	- Validation should also take into consideration shrinkage in some way. Maybe we shrink parameters relative to the amount of training error loss compared to validation loss?
+	- Computation time for training took longer than expected. Maybe possible to optimize the predictor flattening algorithm?
+	- Consider looking at breaking TPM into intermediary qtys or map to a high-dimensional space
+	- "Patience" threshold needs to be changed to make sure epochs aren't being cut off too early
+	- Generation is restricted to linearly weighted systems - extremely unlikely to get 0 integrated information systems. Maybe we make ~10% no integration and check performance?
+	- Generation can still be optimized - this is the least priority since we already have a dataset of 20_000 systems, but still something to consider as we start working with bigger networks
+
 '''
 
 close_db()
 
 end_total = time.perf_counter()
 print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
+
+# COMMIT: add further documentation regarding the results of the processes and considerations for near future developments.
