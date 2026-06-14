@@ -151,11 +151,8 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     X_test_t = torch.tensor(X_test, dtype=torch.float32)
     y_test_t = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
 
-    train_start_time = time.perf_counter()
-
     print("Beginning training the neural net...\n")
 
-    rows = get_all_rows()
     train_dataset = TensorDataset(X_train_t, y_train_t)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
