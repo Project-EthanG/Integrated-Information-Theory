@@ -18,19 +18,37 @@ start_total = time.perf_counter()
 
 # The neural network. Feed forward for now. The number of hidden layers is specified when making the SimpleFFNN object
 class SimpleFFNN(nn.Module):
-    def __init__(self, input_dim: int, hidden_dims: list[int], output_dim: int = 1):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dims: list[int],
+        output_dim: int = 1,
+        dropout_rate: float = 0.2,
+    ):
         super().__init__()
 
         layers = []
         prev_dim = input_dim
+        num_hidden = len(hidden_dims)
 
-        for h in hidden_dims:
+        for i, h in enumerate(hidden_dims):
             layers.append(nn.Linear(prev_dim, h))
             layers.append(nn.ReLU())
+
+            # Taper dropout in the final 2 hidden layers, none after last
+            if i < num_hidden - 2:
+                rate = dropout_rate
+            elif i < num_hidden - 1:
+                rate = dropout_rate / 2
+            else:
+                rate = 0.0
+
+            if rate > 0:
+                layers.append(nn.Dropout(rate))
+
             prev_dim = h
 
         layers.append(nn.Linear(prev_dim, output_dim))
-
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -97,22 +115,19 @@ def gen_and_write_to_db(n: int = 4, num_tpms: int = 100) -> None:
 
 # Flatten the data to feed into the NN. This version, to be updated, simply flattens any multidimensional input to a
 # vector.
-def flatten_predictors(row_slice):
-    flat = []
-    for val in row_slice:
-        if isinstance(val, (list, tuple)):
-            for v in val:
-                # Flatten nested lists/tuples/arrays
-                if isinstance(v, (list, tuple, np.ndarray)):
-                    flat.extend(np.ravel(v).tolist())
-                else:
-                    flat.append(v)
-        elif isinstance(val, np.ndarray):
-            flat.extend(np.ravel(val).tolist())
-        else:
-            flat.append(val)
-    return flat
 
+# Optimized flatten predictors algorithm
+def flatten_predictors(row_slice):
+    def _iter_flat(val):
+        if isinstance(val, np.ndarray):
+            yield from val.ravel()
+        elif isinstance(val, (list, tuple)):
+            for v in val:
+                yield from _iter_flat(v)
+        else:
+            yield val
+
+    return list(_iter_flat(row_slice))
 
 # COMMENT if the dataset already exists. UNCOMMENT if we need to generate a new dataset
 #gen_and_write_to_db(n=6, num_tpms=20_000)
@@ -156,7 +171,7 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     train_dataset = TensorDataset(X_train_t, y_train_t)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
-    model = SimpleFFNN(input_dim=X.shape[1], hidden_dims=[32, 16], output_dim=1)
+    model = SimpleFFNN(input_dim=X.shape[1], hidden_dims=[32, 16], output_dim=1, dropout_rate=0.2)
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), weight_decay=1e-4, lr=0.001)
@@ -165,7 +180,7 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     best_model_weights = None
     patience = 10
     epochs_no_improve = 0
-    val_threshold = 1e-6
+    val_threshold = 1e-8
     max_epochs = 500
 
     for epoch in range(max_epochs):
@@ -323,6 +338,15 @@ Considerations for next week:
 	- "Patience" threshold needs to be changed to make sure epochs aren't being cut off too early
 	- Generation is restricted to linearly weighted systems - extremely unlikely to get 0 integrated information systems. Maybe we make ~10% no integration and check performance?
 	- Generation can still be optimized - this is the least priority since we already have a dataset of 20_000 systems, but still something to consider as we start working with bigger networks
+
+Notes:
+    - Regularization exists already, but I have implemented a dropout rate for the hidden dimensions in the FFNN
+    - Predictor flattening algorithm optimized
+    - Training the NN is a bit slow, this one might be tough to optimize, will look back.
+    - val_loss relative to patience was decreased to allow for new updates on epochs.
+    - Adding 10% non-integrated systems will require a bit of time since that involves running the simulation again...
+    - Intermediary qtys requires more research. Will have this done for next week.
+    - Not worried about tpm generation at the moment.
 
 '''
 
