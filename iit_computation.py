@@ -285,8 +285,12 @@ def integrated_information(tpm, prior) -> tuple[float, float, tuple[list[int]] |
     # these intermediary quantities to find the maximum mutual information
     max_mi, max_bipartition = max_mi_bipartition(prior, full_pres, tpm)
 
-    # Compute the integrated information
+    # Compute the integrated information. Computational errors can occur from precision errors, so we need to round to 0
+    # in minute integration cases
     ii = mi_Xt_Xtpast - max_mi
+    precision_threshold = 1e-8
+    if ii < precision_threshold:
+        ii = 0
 
     # If a non-empty max_bipartition tuple (i.e; least damaging cut exists)
     if max_bipartition:
