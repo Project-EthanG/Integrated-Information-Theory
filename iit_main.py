@@ -1,4 +1,4 @@
-from tpm_generator import tpm_linear_generator, bias_generator, weight_generator, generate_random_det_tpm
+from tpm_generator import tpm_linear_generator, bias_generator, weight_generator, tpm_linear_generator_split
 import iit_computation
 import numpy as np
 import numpy.typing as npt
@@ -71,6 +71,8 @@ def generate_toyset(n: int, num_tpms: int):
     tpms_linear = np.zeros((num_tpms, *state_shape), dtype=float)
     priors: npt.NDArray[np.float64] = np.zeros((num_tpms, N), dtype=np.float64)
 
+    rng = np.random.default_rng(seed=test_seed)
+
     for i in range(num_tpms):
         biases[i] = bias_generator(n)
         weights[i] = weight_generator(n)
@@ -78,7 +80,7 @@ def generate_toyset(n: int, num_tpms: int):
         # Assume uniform prior
         priors[i] = [1 / N] * N
 
-        tpms_linear[i] = tpm_linear_generator(n, biases[i], weights[i])
+        tpms_linear[i] = tpm_linear_generator_split(n, biases[i], weights[i], temp=1, p=0.1, rng=rng)
 
         # Append to list for db data entry
         ii, mi_Xt_Xtpast, max_bipartition, max_mi = iit_computation.integrated_information(tpms_linear[i], priors[i])
@@ -140,7 +142,6 @@ rows: list[tuple[float,float,tuple[list[int]] | None,float,int,npt.NDArray[np.fl
 def define_features(feature_cols: list[int]):
     y = np.array([row[1] for row in rows], dtype=np.float32)
     X = np.array([flatten_predictors([row[i] for i in feature_cols]) for row in rows], dtype=np.float32)
-
     return X, y
 
 
@@ -348,6 +349,8 @@ Notes:
     - Intermediary qtys requires more research. Will have this done for next week.
     - Not worried about tpm generation at the moment.
 
+Koen's D value for effect size measuring change in error rate divided by standard deviation errors
+
 '''
 
 close_db()
@@ -355,4 +358,5 @@ close_db()
 end_total = time.perf_counter()
 print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
 
-# COMMIT: add further documentation regarding the results of the processes and considerations for near future developments.
+# Effect size for comparing model errors and model performance. Validate regularization penalty using validation set
+# More meaningful features from itmerdiary qtys
