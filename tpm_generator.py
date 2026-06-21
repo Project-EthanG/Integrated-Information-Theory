@@ -68,3 +68,40 @@ def tpm_linear_generator(n: int, biases: NDArray[np.float64], weights: NDArray[n
 
             tpm_linearly_generated[row, col] = prob_joint
     return tpm_linearly_generated
+
+
+# We want 10% of the TPMs generated to have 0 integrated information with still random aspects to the TPM. This can be
+# done by taking the tensor product of two independent subsystems
+def tpm_zero_phi(n: int, rng: np.random.Generator) -> NDArray[np.float64]:
+    # Make sure split is correct even for odd n
+    n_a = n // 2
+    n_b = n - n_a
+
+    biases_a = bias_generator(n_a)
+    biases_b = bias_generator(n_b)
+
+    weights_a = weight_generator(n_a)
+    weights_b = weight_generator(n_b)
+
+    tpm_a = tpm_linear_generator(n_a, biases_a, weights_a)
+    tpm_b = tpm_linear_generator(n_b, biases_b, weights_b)
+    return np.kron(tpm_a, tpm_b)
+
+
+def tpm_linear_generator_split(
+        n: int,
+        biases: NDArray[np.float64],
+        weights: NDArray[np.float64],
+        temp: float = 1.0,
+        p: float = 0.1,
+        rng: np.random.Generator | None = None
+) -> NDArray[np.float64]:
+
+    # If probability aligns, generate a 0 integrated system
+    rand_num = rng.random()
+    if rand_num < p:
+        return tpm_zero_phi(n, rng)
+
+    # Otherwise generate a linearly weighted tpm
+    return tpm_linear_generator(n, biases, weights, temp)
+
