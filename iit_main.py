@@ -154,8 +154,10 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
         X, y, test_size=1-prop_train, random_state=test_seed
     )
 
+    relative_test_size = prop_test / (prop_test + prop_val)
+
     X_val, X_test, y_val, y_test = train_test_split(
-        X_temp, y_temp, test_size=0.5, random_state=test_seed
+        X_temp, y_temp, test_size=relative_test_size, random_state=test_seed
     )
 
     X_train_t = torch.tensor(X_train, dtype=torch.float32)
@@ -321,7 +323,7 @@ Model 5: 0.00021159
 
 Test MSE:
 Model 1: 0.00038639
-Model 2: 0.00021075
+Model 2: 0.00021075+
 Model 3: 0.00025522
 Model 4: 0.00040049
 Model 5: 0.00020711
