@@ -186,6 +186,11 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     val_threshold = 1e-8
     max_epochs = 500
 
+    # Learning Rate Scheduling for reducing learning rate as validation loss plateaus
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, threshold=1e-4
+    )
+
     for epoch in range(max_epochs):
         model.train()
         train_loss_accum = 0.0
@@ -204,6 +209,7 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
         with torch.no_grad():
             val_pred = model(X_val_t)
             val_loss = criterion(val_pred, y_val_t).item()
+            scheduler.step(val_loss)
 
         if val_loss < best_val_loss - val_threshold:
             best_val_loss = val_loss
@@ -229,6 +235,25 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
         test_loss = criterion(test_pred, y_test_t)
 
     print("\nTest MSE:", f"{test_loss.item():.4e}")
+
+    baseline_pred = np.full_like(y_test, fill_value=np.mean(y_train), dtype=float)
+
+    # Per-sample squared errors for comparing models
+    nn_sq_errors = (y_test.flatten() - test_pred.numpy().flatten())**2
+    baseline_sq_errors = (y_test.flatten() - baseline_pred.flatten())**2
+
+    # Compare errors across all observations
+    error_diffs = baseline_sq_errors - nn_sq_errors
+    mean_diff = np.mean(error_diffs)
+    sd_diff = np.std(error_diffs, ddof=1)
+
+    if sd_diff > 0:
+        cohens_d = mean_diff / sd_diff
+    else:
+        cohens_d = np.inf
+
+    print(f"Baseline MSE: {np.mean(baseline_sq_errors):.4e}")
+    print(f"Cohen's d (paired): {cohens_d:.4f}")
 
 # The current indices are:
 
@@ -360,5 +385,8 @@ close_db()
 end_total = time.perf_counter()
 print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
 
-# Effect size for comparing model errors and model performance. Validate regularization penalty using validation set
-# More meaningful features from itmerdiary qtys
+# FINISHED: Validate regularization penalty, effect size for model comparison (Cohen's d value)
+# TO DO: meaningful features to derive from the TPM. Some ideas:
+#   average row entropy, effect information, system degeneracy, spectral gap (using something
+#   like Lanczos algorithm to find the eigenvals), entropy of the stationary distribution,
+#   pairwise information residuals.
