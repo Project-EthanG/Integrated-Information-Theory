@@ -390,3 +390,7 @@ print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
 #   average row entropy, effect information, system degeneracy, spectral gap (using something
 #   like Lanczos algorithm to find the eigenvals), entropy of the stationary distribution,
 #   pairwise information residuals.
+
+# stationary dist as distinct entity from uniform prior
+# stationary dist. might not give information not already captured by MI
+# graph theory
