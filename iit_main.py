@@ -109,6 +109,7 @@ def gen_and_write_to_db(n: int = 4, num_tpms: int = 100) -> None:
     # n: number of nodes in the system
     # num_tpms: number of tpms to generate
 
+    # Erase data if it already exists, then prep for new data entry
     drop_db()
     create_db()
 
