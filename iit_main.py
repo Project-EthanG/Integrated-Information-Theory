@@ -82,7 +82,7 @@ def generate_toyset(n: int, num_tpms: int):
 
         tpms_linear[i] = tpm_linear_generator_split(n, biases[i], weights[i], temp=1, p=0.1, rng=rng)
 
-        # Append to list for db data entry
+        # Calculate features and save in DB
         ii, mi_Xt_Xtpast, max_bipartition, max_mi = iit_computation.integrated_information(tpms_linear[i], priors[i])
         network_properties.append((tpms_linear[i], ii, mi_Xt_Xtpast, max_bipartition, max_mi, n, priors[i]))
         print(
@@ -379,6 +379,13 @@ Notes:
 
 Koen's D value for effect size measuring change in error rate divided by standard deviation errors
 
+
+Current considerations:
+- TPM is basically noise. Only performs ever so slightly above average
+- MI is clearly the most important feature
+
+To implement today?
+- Conversion to a node-by-node TPM for the purposes of
 '''
 
 close_db()
@@ -395,3 +402,15 @@ print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
 # stationary dist as distinct entity from uniform prior
 # stationary dist. might not give information not already captured by MI
 # graph theory
+
+# Some pieces to consider from graph theory:
+
+# Strongly connected components SCC (number of SCCs, size of largest SCC)
+# Graph diameter (max distance)
+# Clustering coefficient
+# Measures of centrality (betweenness, closeness, eigenvector, pagerank for eigenvector centrality)
+# Spectral features (largest eigenvalue, change in eigenvalues)
+# Graph density
+# Cycle features (number of cycles, mean cycle length, max cycle length)
+# Core statistics
+# Reciprocity (how many "mutual edges" relative to edges)
