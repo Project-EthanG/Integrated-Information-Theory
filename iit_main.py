@@ -1,4 +1,4 @@
-from tpm_generator import tpm_linear_generator, bias_generator, weight_generator, tpm_linear_generator_split
+from tpm_generator import bias_generator, weight_generator, tpm_linear_generator_split
 import iit_computation
 import numpy as np
 import numpy.typing as npt
@@ -10,6 +10,9 @@ import torch.optim as optim
 import time
 from torch.utils.data import TensorDataset, DataLoader
 import copy
+from feature_generator import compute_nbn_features
+import sys
+
 
 
 test_seed: int = 50
@@ -54,12 +57,62 @@ class SimpleFFNN(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+
+def sbs_to_nbn(tpm):
+    '''
+    Converts a state-by-state TPM to a node-by-node TPM for feature computations.
+    '''
+    N = tpm.shape[0]
+    n = int(np.log2(N))
+
+    # State matrix: (S, n)
+    states = ((np.arange(N)[:, None] >> np.arange(n)) & 1)
+
+    # Present marginals: P(X' = 1 | s)
+    next_states = ((np.arange(N)[:, None] >> np.arange(n)) & 1)
+    P_next = tpm @ next_states
+
+    W = np.zeros((n, n))
+
+    # Iterate over j nodes
+    for j in range(n):
+
+        # split states by bit j
+        bit_j = states[:, j]
+
+        s0 = states[bit_j == 0]
+        s1 = states[bit_j == 1]
+
+        P0 = P_next[bit_j == 0]
+        P1 = P_next[bit_j == 1]
+
+        key0 = np.delete(s0, j, axis=1)
+        key1 = np.delete(s1, j, axis=1)
+
+        order0 = np.lexsort(key0.T)
+        order1 = np.lexsort(key1.T)
+
+        P0 = P0[order0]
+        P1 = P1[order1]
+
+        # now paired differences across matched contexts
+        diff = P1 - P0
+
+        W[:, j] = np.max(np.abs(diff), axis=0)
+
+    return W
+
+
+
 def generate_toyset(n: int, num_tpms: int):
+
+    print("Beginning network generation...")
+
     # Monitor computational cost
     tpm_gen_start_time = time.perf_counter()
 
     # Stores ii, mi_Xt_Xtpast, max_bipartition, max_mi, num_nodes, prior
-    network_properties: list[tuple[float, float, tuple[list[int]] | None, float, int, npt.NDArray[np.float64]]] = []
+    network_properties = []
     node_shape: tuple[int, int] = (n, n)
     biases = np.zeros((num_tpms, n), dtype=float)
     weights = np.zeros((num_tpms, *node_shape), dtype=float)
@@ -84,10 +137,17 @@ def generate_toyset(n: int, num_tpms: int):
 
         # Calculate features and save in DB
         ii, mi_Xt_Xtpast, max_bipartition, max_mi = iit_computation.integrated_information(tpms_linear[i], priors[i])
-        network_properties.append((tpms_linear[i], ii, mi_Xt_Xtpast, max_bipartition, max_mi, n, priors[i]))
-        print(
-            f"Finished generating TPM number {i + 1} and computing its integrated information. Writing to database...")
+        nbn_tpm = sbs_to_nbn(tpms_linear[i])
 
+        # Node by node feature generation
+        nbn_features: list = compute_nbn_features(nbn_tpm)
+        network_properties.append(
+            (tpms_linear[i], ii, mi_Xt_Xtpast, max_bipartition, max_mi, n, priors[i],
+             *nbn_features)
+        )
+        print(
+            f"Finished generating TPM number {i + 1} and computing its integrated information.")
+    print(f"Writing to database...")
     write_to_db(network_properties)
 
     tpm_gen_end_time: float = time.perf_counter()
@@ -133,12 +193,13 @@ def flatten_predictors(row_slice):
     return list(_iter_flat(row_slice))
 
 # COMMENT if the dataset already exists. UNCOMMENT if we need to generate a new dataset
-#gen_and_write_to_db(n=6, num_tpms=20_000)
+gen_and_write_to_db(n=6, num_tpms=20_000)
 
 
 # Stores all the db entries. For code sanitation this intermediary array should not be necessary.
 # FUTURE FEATURE IMPLEMENTATION REQUIRED
-rows: list[tuple[float,float,tuple[list[int]] | None,float,int,npt.NDArray[np.float64]]] = get_all_rows()
+rows = get_all_rows()
+print(len(rows))
 
 def define_features(feature_cols: list[int]):
     y = np.array([row[1] for row in rows], dtype=np.float32)
@@ -270,30 +331,39 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
 # of units and prior are currently fixed, so they do not have any influence as predictors
 
 # Model 1: TPM, prior and no. nodes
-print(f"Defining features...")
+print(f"Defining features for model 1...")
 X_raw, y_raw = define_features([0, 5, 6])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 # Model 2: MI, prior and no. nodes
-print(f"Defining features...")
+print(f"Defining features for model 2...")
 X_raw, y_raw = define_features([2, 5, 6])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 # Model 3: TPM, MI, prior and no. nodes
-print(f"Defining features...")
+print(f"Defining features for model 3...")
 X_raw, y_raw = define_features([0, 2, 5, 6])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 # Model 4: TPM
-print(f"Defining features...")
+print(f"Defining features for model 4...")
 X_raw, y_raw = define_features([0])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 # Model 5: MI
-print(f"Defining features...")
+print(f"Defining features for model 5...")
 X_raw, y_raw = define_features([2])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
+# Model 6: EVERYTHING
+print(f"Defining all features for model 6...")
+X_raw, y_raw = define_features([0] + list(range(2, 30)))
+fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
+
+# Model 7: Everything but the TPM
+print(f"Defining all features for model 7...")
+X_raw, y_raw = define_features(list(range(2, 30)))
+fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 '''
 Current results:
@@ -405,12 +475,12 @@ print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
 
 # Some pieces to consider from graph theory:
 
-# Strongly connected components SCC (number of SCCs, size of largest SCC)
-# Graph diameter (max distance)
-# Clustering coefficient
-# Measures of centrality (betweenness, closeness, eigenvector, pagerank for eigenvector centrality)
-# Spectral features (largest eigenvalue, change in eigenvalues)
-# Graph density
-# Cycle features (number of cycles, mean cycle length, max cycle length)
-# Core statistics
+# Strongly connected components SCC (number of SCCs, size of largest SCC) DONE
+# Graph diameter (max distance) DONE
+# Clustering coefficient DONE
+# Measures of centrality (betweenness, closeness, eigenvector, pagerank for eigenvector centrality) DONE
+# Spectral features (largest eigenvalue, change in eigenvalues) DONE
+# Graph density DONE
+# Cycle features (number of cycles, mean cycle length, max cycle length) DONE
+# Core statistics NOT GOING TO DO
 # Reciprocity (how many "mutual edges" relative to edges)
