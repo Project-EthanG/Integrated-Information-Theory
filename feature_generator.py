@@ -94,7 +94,7 @@ def graph_density(W):
     max_edges = n * (n - 1)
     weighted_sum = np.sum(W * (~np.eye(n, dtype=bool)))
     weighted_density = weighted_sum / max_edges
-
+    # Look at distribution as well as the main value
     return weighted_density
 
 
@@ -188,3 +188,18 @@ def compute_nbn_features(tpm):
 
         num_cycles, mean_cycle, max_cycle
     )
+
+
+
+# Clustering coefficient
+# Minimum path length
+# Small world (high clustering + low path lengths) -> by watts and strogatz (1998) collective dynamics of small
+# world
+# Cheeger constant
+
+# Some pieces to consider:
+
+# Weighted clustering coefficient: https://pmc.ncbi.nlm.nih.gov/articles/PMC374315/. Python equiv is
+# nx.clustering(G, weight="weight")
+
+
