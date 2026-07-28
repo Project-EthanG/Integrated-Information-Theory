@@ -36,29 +36,29 @@ def drop_db() -> None:
     cur.execute('''DROP TABLE IF EXISTS network_property''')
 
 
+# All non-serialized features are assumed to be floats
+def _cast_to_float(obj):
+    if isinstance(obj, dict):
+        return {k: _cast_to_float(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_cast_to_float(v) for v in obj]
+    if isinstance(obj, (int, float, np.floating, np.integer, bool)):
+        return float(obj)
+    if obj is None:
+        return None
+
+    return obj
+
+
 def write_to_db(network_properties) -> None:
-    """
-    Each item in network_properties is a dict, e.g.:
-    {
-        "tpm": np.ndarray,
-        "tpm_prior": np.ndarray,
-        "max_bipartition": [[...], [...]] or None,
-        "features": {
-            "ii": ..., "mi": ..., "max_mi": ..., "num_nodes": ...,
-            "clustering_mean": ..., "betweenness_max": ..., ...
-            # add/remove keys freely -- no other code needs to change
-        }
-    }
-    """
     rows = []
     for prop in network_properties:
         rows.append((
             json.dumps(prop["tpm"].tolist()),
             json.dumps(prop["tpm_prior"].tolist()),
             json.dumps(prop["max_bipartition"]) if prop["max_bipartition"] is not None else None,
-            json.dumps(prop["features"]),
+            json.dumps(_cast_to_float(prop["features"])),   # <-- cast here
         ))
-
     with con:
         cur.executemany(
             '''
