@@ -26,8 +26,7 @@ NBN_FEATURE_NAMES: list[str] = [
     "avg_betweenness", "max_pr", "min_pr", "mean_pr"
 ]
 
-# Keys that live at the top level of a row dict rather than inside "features"
-# (these need special (de)serialization, e.g. arrays / nested lists).
+# Features that requre specific handling (i.e; serialization for network feeding)
 STRUCTURAL_KEYS = {"tpm", "tpm_prior", "max_bipartition"}
 
 
@@ -174,7 +173,7 @@ def define_features(feature_names: list[str], target = "ii"):
     return X, y
 
 
-def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: float = 0.3):
+def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: float = 0.3) -> float:
 
     if prop_train + prop_test + prop_val != 1:
         raise ValueError("Invalid train-test-validation split")
@@ -277,18 +276,23 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     mean_diff = np.mean(error_diffs)
     sd_diff = np.std(error_diffs, ddof=1)
 
-    cohens_d = mean_diff / sd_diff if sd_diff > 0 else np.inf
+    cohens_d: float = mean_diff / sd_diff if sd_diff > 0 else np.inf
 
     # TEMP:
-    print("test_pred sample:", test_pred[:5].flatten().numpy())
-    print("y_test sample:   ", y_test[:5])
     print("baseline value:", np.mean(y_train))
+    print(f"Cohen's d (paired): {cohens_d:.4f} \n")
 
-    print(f"Baseline MSE: {np.mean(baseline_sq_errors):.4e}")
-    print(f"Cohen's d (paired): {cohens_d:.4f}")
+    return cohens_d
 
 
 ALL_FEATURE_NAMES = ["tpm"] + list(_get.__wrapped__ if False else [])  # placeholder removed below
+
+# Make sure our predicting factor is not part of the feature space
+TARGET = "ii"
+
+all_feature_names = [k for k in rows[0]["features"].keys() if k != TARGET]
+
+'''
 
 print(f"Defining features for model 1...")
 X_raw, y_raw = define_features(["tpm", "num_nodes", "tpm_prior"])
@@ -310,12 +314,6 @@ print(f"Defining features for model 5...")
 X_raw, y_raw = define_features(["mi"])
 fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
-# Make sure our predicting factor is not part of the feature space
-TARGET = "ii"
-
-all_feature_names = [k for k in rows[0]["features"].keys() if k != TARGET]
-
-
 
 print(f"Defining all features for model 6...")
 X_raw, y_raw = define_features(["tpm"] + all_feature_names, target=TARGET)
@@ -331,8 +329,61 @@ fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
 
 # TEMP:
 print("y_raw mean/std:", y_raw.mean(), y_raw.std())
-
+'''
 close_db()
+
+# The best performing model was Model 7. The goal is to determine which features are the most
+# important. Let's start with backward selection (test full model then remove features one by one
+# and measure the impact on MSE).
+
+def backward_selection(features: list[str]):
+
+    prop_train = 0.4
+    prop_test = 0.3
+    prop_val = 0.3
+
+    # Train the full model as baseline
+
+    print(f"Training the full model...")
+    X_full, y_full = define_features(features, target=TARGET)
+    d_val_old: float = fit_FNN(X_full, y_full, prop_train, prop_test, prop_val)
+
+    feature_effect = {}
+
+    # features[:] makes a copy of the list since we are removing elements from the list we are
+    # iterating through. Let's look at the features in reverse...
+    for feature in features[::-1]:
+        # Remove the feature and fit the model
+        features.remove(feature)
+
+        print(f"Removing feature {feature}...")
+        X, y = define_features(features, target=TARGET)
+        d_val_new = fit_FNN(X, y, prop_train, prop_test, prop_val)
+
+        # Store the change in Coen's d-val as the feature's impact on the model
+        # Large d_val_change => model gained accuracy when dropping feature => feature added noise
+        # Negative d_val_change => model lost accuracy when dropping feature => important feature to keep
+        d_val_change = d_val_new - d_val_old
+        feature_effect[feature] = (-1) * d_val_change
+
+        # The new MSE becomes the old MSE
+        d_val_old = d_val_new
+
+        # If we go through all the features...
+        if len(features) < 2:
+            print(f"Out of features to test! \n")
+            return feature_effect
+
+    return feature_effect
+
+# Look at the effects of feature selection via backwards selection on the FFNN
+feature_effects = backward_selection(all_feature_names)
+
+# Biggest to smallest, print the results
+for key, value in sorted(feature_effects.items(), key=lambda item: item[1], reverse=True):
+    print(f"Feature {key} provides {value:.6f} in Coen's d value")
+
+
 
 end_total = time.perf_counter()
 print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
