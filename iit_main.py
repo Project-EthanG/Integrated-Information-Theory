@@ -173,6 +173,32 @@ def define_features(feature_names: list[str], target = "ii"):
     return X, y
 
 
+# For deciding how many hidden layers and the dim for each layer
+def suggest_architecture(n_features: int, n_samples: int) -> list[int]:
+    # Rough funnel: first hidden layer close to input width, then taper
+    base = max(8, min(256, 2 * n_features))
+
+    # Want ~10-30 samples per parameter, roughly
+    max_params_budget = n_samples * 5
+
+    dims = [base, max(8, base // 2)]
+
+    # Crude param count check for a 2-layer MLP
+    def param_count(dims, in_dim):
+        prev = in_dim
+        total = 0
+        for d in dims:
+            total += prev * d + d
+            prev = d
+        total += prev * 1 + 1
+        return total
+
+    while param_count(dims, n_features) > max_params_budget and dims[0] > 8:
+        dims = [max(8, d // 2) for d in dims]
+
+    return dims
+
+
 def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: float = 0.3) -> float:
 
     if prop_train + prop_test + prop_val != 1:
@@ -207,20 +233,27 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     train_dataset = TensorDataset(X_train_t, y_train_t)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
-    model = SimpleFFNN(input_dim=X.shape[1], hidden_dims=[32, 16], output_dim=1, dropout_rate=0.2)
+    hidden_dims = suggest_architecture(n_features=X.shape[1], n_samples=X_train.shape[0])
+    model = SimpleFFNN(input_dim=X.shape[1], hidden_dims=hidden_dims, output_dim=1, dropout_rate=0.2)
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), weight_decay=1e-4, lr=0.001)
 
     best_val_loss = float('inf')
     best_model_weights = None
-    patience = 10
+    epoch_patience = 10
     epochs_no_improve = 0
-    val_threshold = 1e-8
+    val_threshold = 0
     max_epochs = 500
 
+    # Threshold is determined relative to change in loss (i.e; more than 1% improvement from before?)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, threshold=1e-4
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=10,
+        threshold=1e-3,
+        threshold_mode="rel",
     )
 
     for epoch in range(max_epochs):
@@ -251,8 +284,8 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
             print(f"Epoch {epoch:3d} | Train Loss: {avg_train_loss:.4e} | Val Loss: {val_loss:.4e}")
         else:
             epochs_no_improve += 1
-            if epochs_no_improve >= patience:
-                print(f"\nEarly stopping at epoch {epoch} — no improvement for {patience} consecutive epochs.")
+            if epochs_no_improve >= epoch_patience:
+                print(f"\nEarly stopping at epoch {epoch} — no improvement for {epoch_patience} consecutive epochs.")
                 break
 
     if best_model_weights is not None:
