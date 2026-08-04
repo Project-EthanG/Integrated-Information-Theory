@@ -22,7 +22,6 @@ def create_db() -> None:
                idx INTEGER PRIMARY KEY AUTOINCREMENT,
                tpm TEXT,
                tpm_prior TEXT,
-               max_bipartition TEXT,
                features TEXT
         )
     ''')
@@ -56,13 +55,12 @@ def write_to_db(network_properties) -> None:
         rows.append((
             json.dumps(prop["tpm"].tolist()),
             json.dumps(prop["tpm_prior"].tolist()),
-            json.dumps(prop["max_bipartition"]) if prop["max_bipartition"] is not None else None,
             json.dumps(_cast_to_float(prop["features"])),   # <-- cast here
         ))
     with con:
         cur.executemany(
             '''
-            INSERT INTO network_property (tpm, tpm_prior, max_bipartition, features)
+            INSERT INTO network_property (tpm, tpm_prior, features)
             VALUES (?, ?, ?, ?)
             ''',
             rows
@@ -74,10 +72,6 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     return {
         "tpm": deserialize_array(row["tpm"]),
         "tpm_prior": deserialize_array(row["tpm_prior"]),
-        "max_bipartition": (
-            deserialize_bipartition(row["max_bipartition"])
-            if row["max_bipartition"] is not None else None
-        ),
         "features": json.loads(row["features"]),
     }
 
@@ -85,7 +79,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 def get_row_by_idx(idx: int) -> dict | None:
     with con:
         res = cur.execute(
-            'SELECT tpm, tpm_prior, max_bipartition, features FROM network_property WHERE idx = ?',
+            'SELECT tpm, tpm_prior, features FROM network_property WHERE idx = ?',
             [idx]
         )
         row = res.fetchone()
@@ -95,7 +89,7 @@ def get_row_by_idx(idx: int) -> dict | None:
 
 def get_all_rows() -> list[dict]:
     with con:
-        res = cur.execute('SELECT tpm, tpm_prior, max_bipartition, features FROM network_property')
+        res = cur.execute('SELECT tpm, tpm_prior, features FROM network_property')
         rows = res.fetchall()
 
     return [_row_to_dict(row) for row in rows]
