@@ -263,7 +263,7 @@ def max_mi_bipartition(prior, full_pres, tpm) -> tuple[float, tuple[list[int]]]:
     return max_mi_m1m2, max_partition
 
 
-def integrated_information(tpm, prior) -> tuple[float, float, tuple[list[int]] | None, float]:
+def integrated_information(tpm, prior) -> tuple[float, float]:
     # We wish to find the integrated information. We need the mutual information of
     # the entire network, and the maximum mutual information across each bipartition
     # to find to the integrated information
@@ -292,11 +292,4 @@ def integrated_information(tpm, prior) -> tuple[float, float, tuple[list[int]] |
     if ii < precision_threshold:
         ii = 0
 
-    # If a non-empty max_bipartition tuple (i.e; least damaging cut exists)
-    if max_bipartition:
-        return ii, mi_Xt_Xtpast, max_bipartition, max_mi
-
-    # Otherwise every cut contributes the same (i.e; 0 MI on every cut; fully
-    # integrated system)
-    return (ii, mi_Xt_Xtpast, None,
-            max_mi)
+    return ii, mi_Xt_Xtpast
