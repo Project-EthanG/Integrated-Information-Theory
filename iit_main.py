@@ -12,6 +12,8 @@ from torch.utils.data import TensorDataset, DataLoader
 import copy
 from feature_generator import compute_nbn_features
 from sklearn.preprocessing import StandardScaler
+import itertools
+
 
 
 test_seed: int = 50
@@ -27,10 +29,10 @@ NBN_FEATURE_NAMES: list[str] = [
 ]
 
 # Features that requre specific handling (i.e; serialization for network feeding)
-STRUCTURAL_KEYS = {"tpm", "tpm_prior", "max_bipartition"}
+STRUCTURAL_KEYS = {"tpm", "tpm_prior"}
 
 
-# The neural network. Feed forward for now. The number of hidden layers is specified when making the SimpleFFNN object
+# The neural network. Feed forward for now. Using softplus activation since ii is non-negative
 class SimpleFFNN(nn.Module):
     def __init__(
         self,
@@ -47,7 +49,7 @@ class SimpleFFNN(nn.Module):
 
         for i, h in enumerate(hidden_dims):
             layers.append(nn.Linear(prev_dim, h))
-            layers.append(nn.ReLU())
+            layers.append(nn.Softplus())
 
             # Taper dropout in the final 2 hidden layers, none after last
             if i < num_hidden - 2:
@@ -75,7 +77,7 @@ def generate_toyset(n: int, num_tpms: int):
 
     tpm_gen_start_time = time.perf_counter()
 
-    # Each entry is now a dict: {"tpm", "tpm_prior", "max_bipartition", "features": {...}}
+    # Each entry is now a dict: {"tpm", "tpm_prior", "features": {...}}
     network_properties: list[dict] = []
     node_shape: tuple[int, int] = (n, n)
     biases = np.zeros((num_tpms, n), dtype=float)
@@ -96,7 +98,7 @@ def generate_toyset(n: int, num_tpms: int):
 
         tpms_linear[i] = tpm_linear_generator_split(n, biases[i], weights[i], temp=1, p=0.1, rng=rng)
 
-        ii, mi_Xt_Xtpast, max_bipartition, max_mi = iit_computation.integrated_information(tpms_linear[i], priors[i])
+        ii, mi_Xt_Xtpast = iit_computation.integrated_information(tpms_linear[i], priors[i])
 
         nbn_features: list = compute_nbn_features(tpms_linear[i])
 
@@ -104,9 +106,7 @@ def generate_toyset(n: int, num_tpms: int):
         # Adding a new feature anywhere upstream (iit_computation or compute_nbn_features)
         # only requires adding its name/value pair here -- nothing else below changes.
         features = {
-            "ii": ii,
             "mi": mi_Xt_Xtpast,
-            "max_mi": max_mi,
             "num_nodes": n,
             **dict(zip(NBN_FEATURE_NAMES, nbn_features)),
         }
@@ -114,7 +114,6 @@ def generate_toyset(n: int, num_tpms: int):
         network_properties.append({
             "tpm": tpms_linear[i],
             "tpm_prior": priors[i],
-            "max_bipartition": max_bipartition,
             "features": features,
         })
 
@@ -173,7 +172,8 @@ def define_features(feature_names: list[str], target = "ii"):
     return X, y
 
 
-# For deciding how many hidden layers and the dim for each layer
+# For deciding how many hidden layers and the dim for each layer. This is TEMPORARY, to be changed
+# to a validation loop to grid search parameters...
 def suggest_architecture(n_features: int, n_samples: int) -> list[int]:
     # Rough funnel: first hidden layer close to input width, then taper
     base = max(8, min(256, 2 * n_features))
@@ -199,10 +199,8 @@ def suggest_architecture(n_features: int, n_samples: int) -> list[int]:
     return dims
 
 
-def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: float = 0.3) -> float:
 
-    if prop_train + prop_test + prop_val != 1:
-        raise ValueError("Invalid train-test-validation split")
+def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: float = 0.3) -> float:
 
     X_train, X_temp, y_train, y_temp = train_test_split(
         X, y, test_size=1 - prop_train, random_state=test_seed
@@ -228,7 +226,7 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     X_test_t = torch.tensor(X_test, dtype=torch.float32)
     y_test_t = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
 
-    print("Beginning training the neural net...\n")
+    print("Beginning training the neural net...")
 
     train_dataset = TensorDataset(X_train_t, y_train_t)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
@@ -280,24 +278,24 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
             best_val_loss = val_loss
             best_model_weights = copy.deepcopy(model.state_dict())
             epochs_no_improve = 0
-            print(f"New best model saved at epoch {epoch}")
-            print(f"Epoch {epoch:3d} | Train Loss: {avg_train_loss:.4e} | Val Loss: {val_loss:.4e}")
+            #print(f"New best model saved at epoch {epoch}")
+            #print(f"Epoch {epoch:3d} | Train Loss: {avg_train_loss:.4e} | Val Loss: {val_loss:.4e}")
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= epoch_patience:
-                print(f"\nEarly stopping at epoch {epoch} — no improvement for {epoch_patience} consecutive epochs.")
+                #print(f"\nEarly stopping at epoch {epoch} — no improvement for {epoch_patience} consecutive epochs.")
                 break
 
     if best_model_weights is not None:
         model.load_state_dict(best_model_weights)
-        print(f"\nRestored best model weights (val_loss={best_val_loss:.4e})")
+        #print(f"\nRestored best model weights (val_loss={best_val_loss:.4e})")
 
     model.eval()
     with torch.no_grad():
         test_pred = model(X_test_t)
         test_loss = criterion(test_pred, y_test_t)
 
-    print("\nTest MSE:", f"{test_loss.item():.4e}")
+    #print("\nTest MSE:", f"{test_loss.item():.4e}")
 
 
     baseline_pred = np.full_like(y_test, fill_value=np.mean(y_train), dtype=float)
@@ -311,63 +309,24 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
 
     cohens_d: float = mean_diff / sd_diff if sd_diff > 0 else np.inf
 
-    # TEMP:
-    print("baseline value:", np.mean(y_train))
-    print(f"Cohen's d (paired): {cohens_d:.4f} \n")
+    print(f"Cohen's d (paired): {cohens_d:.4f}")
 
     return cohens_d
 
 
-ALL_FEATURE_NAMES = ["tpm"] + list(_get.__wrapped__ if False else [])  # placeholder removed below
-
 # Make sure our predicting factor is not part of the feature space
 TARGET = "ii"
 
-all_feature_names = [k for k in rows[0]["features"].keys() if k != TARGET]
-
-'''
-
-print(f"Defining features for model 1...")
-X_raw, y_raw = define_features(["tpm", "num_nodes", "tpm_prior"])
-fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
-
-print(f"Defining features for model 2...")
-X_raw, y_raw = define_features(["mi", "num_nodes", "tpm_prior"])
-fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
-
-print(f"Defining features for model 3...")
-X_raw, y_raw = define_features(["tpm", "mi", "num_nodes", "tpm_prior"])
-fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
-
-print(f"Defining features for model 4...")
-X_raw, y_raw = define_features(["tpm"])
-fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
-
-print(f"Defining features for model 5...")
-X_raw, y_raw = define_features(["mi"])
-fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
-
-
-print(f"Defining all features for model 6...")
-X_raw, y_raw = define_features(["tpm"] + all_feature_names, target=TARGET)
-fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
-
-# TEMP:
-print("y_raw mean/std:", y_raw.mean(), y_raw.std())
-
-
-print(f"Defining all features for model 7...")
-X_raw, y_raw = define_features(all_feature_names, target=TARGET)
-fit_FNN(X_raw, y_raw, 0.4, 0.3, 0.3)
-
-# TEMP:
-print("y_raw mean/std:", y_raw.mean(), y_raw.std())
-'''
+# Need to hardcode for now, but max_mi has been removed from the database so next dataset generation
+# will eliminate max_mi from the feature space
+all_feature_names = [k for k in rows[0]["features"].keys() if k != TARGET and k != "max_mi"]
 close_db()
 
 # The best performing model was Model 7. The goal is to determine which features are the most
 # important. Let's start with backward selection (test full model then remove features one by one
 # and measure the impact on MSE).
+
+
 
 def backward_selection(features: list[str]):
 
@@ -375,48 +334,90 @@ def backward_selection(features: list[str]):
     prop_test = 0.3
     prop_val = 0.3
 
-    # Train the full model as baseline
+    # Start by assuming the full model is most optimal
+    optimal_features = features
+    model_can_improve = True
 
-    print(f"Training the full model...")
-    X_full, y_full = define_features(features, target=TARGET)
-    d_val_old: float = fit_FNN(X_full, y_full, prop_train, prop_test, prop_val)
+    current_idx = 0
 
-    feature_effect = {}
+    print(f"There are {len(features)} features in the full model. Beginning backwards selection...")
+    print(f"Features: {features}")
 
-    # features[:] makes a copy of the list since we are removing elements from the list we are
-    # iterating through. Let's look at the features in reverse...
-    for feature in features[::-1]:
-        # Remove the feature and fit the model
-        features.remove(feature)
 
-        print(f"Removing feature {feature}...")
+    while model_can_improve:
+
+        # Train on the current optimal model
         X, y = define_features(features, target=TARGET)
-        d_val_new = fit_FNN(X, y, prop_train, prop_test, prop_val)
+        coen_optimal_model = fit_FNN(X, y, prop_train, prop_test, prop_val)
 
-        # Store the change in Coen's d-val as the feature's impact on the model
-        # Large d_val_change => model gained accuracy when dropping feature => feature added noise
-        # Negative d_val_change => model lost accuracy when dropping feature => important feature to keep
-        d_val_change = d_val_new - d_val_old
-        feature_effect[feature] = (-1) * d_val_change
+        # In the update loop, unless the model increases Coen by removing a feature,
+        # the model does not improve
+        model_can_improve = False
+        worst_feature: str = ""
 
-        # The new MSE becomes the old MSE
-        d_val_old = d_val_new
+        # Iterate through a copy of the features since we are going to remove and re-add features
+        # temporarily until the worst one is found for the given iteration
 
-        # If we go through all the features...
-        if len(features) < 2:
-            print(f"Out of features to test! \n")
-            return feature_effect
+        print(f"Iteration {current_idx} of backwards selection: \n")
+        for feature in features[:]:
+            print(f"Temporarily removing feature {feature}...")
 
-    return feature_effect
+            features.remove(feature)
+
+            print(f"Remaining features: {features}")
+
+            X, y = define_features(features, target=TARGET)
+            coen_reduced_model = fit_FNN(X, y, prop_train, prop_test, prop_val)
+
+            # If removing the feature improved the prediction, update the new best Coen d val and
+            # store the corresponding features
+            if coen_reduced_model > coen_optimal_model:
+                print(f"Removing feature {feature} improved Coen's d by {coen_reduced_model - coen_optimal_model}")
+                print(f"Temporarily recovering feature...\n")
+                coen_optimal_model = coen_reduced_model
+                model_can_improve = True
+                optimal_features = features
+                print(optimal_features)
+                worst_feature = feature
+
+            else:
+                print(f"Removing feature {feature} imposed error. Recovering feature...\n")
+
+            features.append(feature)
+
+
+        if model_can_improve:
+            print(f"New best features for iteration {current_idx}: {optimal_features}")
+            features.remove(worst_feature)
+            print(f"Feature {worst_feature} is permanently removed from the model.")
+            print(f"There are {len(features)} features in the new model. Moving to next index...\n")
+            current_idx += 1
+
+        else:
+            print(f"No more features could be removed. Optimal features recovered.")
+            return optimal_features
+
 
 # Look at the effects of feature selection via backwards selection on the FFNN
-feature_effects = backward_selection(all_feature_names)
+features_sub = backward_selection(all_feature_names)
 
-# Biggest to smallest, print the results
-for key, value in sorted(feature_effects.items(), key=lambda item: item[1], reverse=True):
-    print(f"Feature {key} provides {value:.6f} in Coen's d value")
+# Let's compare the reduced model from backselection to the full model
+
+X_sub, y_sub = define_features(features_sub, target=TARGET)
+coen_sub = fit_FNN(X_sub, y_sub)
+
+X_full, y_full = define_features(all_feature_names, target=TARGET)
+coen_full = fit_FNN(X_full, y_full)
+
+print(f"Full model Coen's d value: {coen_full:.4f}")
+print(f"Reduced model Coen's d value: {coen_sub:.4f}")
 
 
 
 end_total = time.perf_counter()
 print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
+
+# To be commited
+# FEATURE: compute sub and anti sub models for finding which features are "meaningful"
+
+
