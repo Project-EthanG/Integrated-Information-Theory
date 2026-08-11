@@ -327,6 +327,7 @@ close_db()
 # and measure the impact on MSE).
 
 
+coen_full = 0
 
 def backward_selection(features: list[str]):
 
@@ -349,6 +350,9 @@ def backward_selection(features: list[str]):
         # Train on the current optimal model
         X, y = define_features(features, target=TARGET)
         coen_optimal_model = fit_FNN(X, y, prop_train, prop_test, prop_val)
+
+        if current_idx == 0:
+            coen_full = coen_optimal_model
 
         # In the update loop, unless the model increases Coen by removing a feature,
         # the model does not improve
@@ -406,8 +410,7 @@ features_sub = backward_selection(all_feature_names)
 X_sub, y_sub = define_features(features_sub, target=TARGET)
 coen_sub = fit_FNN(X_sub, y_sub)
 
-X_full, y_full = define_features(all_feature_names, target=TARGET)
-coen_full = fit_FNN(X_full, y_full)
+
 
 print(f"Full model Coen's d value: {coen_full:.4f}")
 print(f"Reduced model Coen's d value: {coen_sub:.4f}")
