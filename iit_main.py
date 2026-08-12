@@ -420,7 +420,9 @@ print(f"Reduced model Coen's d value: {coen_sub:.4f}")
 end_total = time.perf_counter()
 print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
 
-# To be commited
-# FEATURE: compute sub and anti sub models for finding which features are "meaningful"
+# Full model: 0.5048
+# Sub model: 0.5096
 
+# Optimal features:
+# ['mi', 'wr', 'weight_cluster_coeff', 'short_path_len', 'cheeger_coeff', 'max_scc', 'avg_closeness', 'max_pr']
 
