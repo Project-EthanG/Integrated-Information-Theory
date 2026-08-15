@@ -132,9 +132,12 @@ def generate_toyset(n: int, num_tpms: int):
         print(f"\nComplete! Finished processing {num_tpms} tpms in {total_tpm_time:.4f} seconds")
 
 
-def gen_and_write_to_db(n: int = 4, num_tpms: int = 100) -> None:
-    drop_db()
-    create_db()
+def gen_and_write_to_db(n: int = 4, num_tpms: int = 100, rewrite_db: bool = True) -> None:
+    # If we want to regenerate every system, otherwise add on to what previously exists
+    if rewrite_db:
+        drop_db()
+        create_db()
+
     generate_toyset(n, num_tpms)
 
 
@@ -152,7 +155,10 @@ def flatten_predictors(row_slice):
 
 
 # COMMENT if the dataset already exists. UNCOMMENT if we need to generate a new dataset
-#gen_and_write_to_db(n=6, num_tpms=20_000)
+#gen_and_write_to_db(n=6, num_tpms=20_000, rewrite_db=True)
+
+# Add some 8 node systems without rewriting the db
+gen_and_write_to_db(n=8, num_tpms=100, rewrite_db=False)
 
 rows = get_all_rows()
 
