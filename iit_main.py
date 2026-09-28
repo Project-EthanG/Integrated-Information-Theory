@@ -13,8 +13,28 @@ import copy
 from feature_generator import compute_nbn_features
 from sklearn.preprocessing import StandardScaler
 import itertools
+from typing import NamedTuple, Optional
 
 test_seed: int = 50
+
+# Seeds for repeated training runs. The train/validation/test split always uses test_seed, so every
+# run sees identical data (and therefore an identical baseline). Only the torch seed varies, which
+# controls weight initialization, batch order and dropout masks.
+N_SEEDS: int = 5
+TORCH_SEEDS: list[int] = [test_seed + k for k in range(N_SEEDS)]
+
+# During backward selection, a feature is only removed if doing so lowers the mean validation MSE
+# by more than SE_MARGIN standard errors of the current model's seed-to-seed spread.
+# Set to 0 to accept any improvement in the mean validation MSE.
+SE_MARGIN: float = 1.0
+
+
+class FitResult(NamedTuple):
+    """Outputs of one training run. Test-set fields are None unless evaluate_test=True."""
+    val_mse: float
+    test_mse: Optional[float] = None
+    cohens_d: Optional[float] = None
+    baseline_mse: Optional[float] = None
 
 start_total = time.perf_counter()
 
@@ -122,7 +142,7 @@ def generate_toyset(n: int, num_tpms: int):
     total_tpm_time: float = tpm_gen_end_time - tpm_gen_start_time
 
     if total_tpm_time > 60:
-        print(f"\nComp  lete! Finished processing {num_tpms} tpms in {int(total_tpm_time / 60)} "
+        print(f"\nComplete! Finished processing {num_tpms} tpms in {int(total_tpm_time / 60)} "
               f"minutes and {total_tpm_time % 60:.4f} seconds")
     else:
         print(f"\nComplete! Finished processing {num_tpms} tpms in {total_tpm_time:.4f} seconds")
@@ -151,11 +171,7 @@ def flatten_predictors(row_slice):
 
 
 # COMMENT if the dataset already exists. UNCOMMENT if we need to generate a new dataset
-# gen_and_write_to_db(n=6, num_tpms=20_000, rewrite_db=True)
-
-# Add some 8 node systems without rewriting the db
-gen_and_write_to_db(n=6, num_tpms=100, rewrite_db=True)
-
+#gen_and_write_to_db(n=6, num_tpms=20_000, rewrite_db=True)
 
 rows = get_all_rows()
 
@@ -202,7 +218,20 @@ def suggest_architecture(n_features: int, n_samples: int) -> list[int]:
     return dims
 
 
-def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: float = 0.3) -> float:
+def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: float = 0.3,
+            seed: int = test_seed, evaluate_test: bool = False) -> FitResult:
+    """
+    Trains the FFNN and returns a FitResult.
+
+    The data split always uses test_seed, so every call sees the same train/validation/test rows.
+    `seed` only controls torch (weight initialization, DataLoader shuffling and dropout masks), so
+    repeated calls with different seeds measure run-to-run variation on identical data.
+
+    The test set is only evaluated when evaluate_test=True. Feature selection should call this with
+    evaluate_test=False and rely on val_mse, so the test set is only used for the final report.
+    """
+    torch.manual_seed(seed)
+
     X_train, X_temp, y_train, y_temp = train_test_split(
         X, y, test_size=1 - prop_train, random_state=test_seed
     )
@@ -227,7 +256,7 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     X_test_t = torch.tensor(X_test, dtype=torch.float32)
     y_test_t = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
 
-    print("Beginning training the neural net...")
+    print(f"Beginning training the neural net (seed {seed})...")
 
     train_dataset = TensorDataset(X_train_t, y_train_t)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
@@ -291,17 +320,23 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
         model.load_state_dict(best_model_weights)
         # print(f"\nRestored best model weights (val_loss={best_val_loss:.4e})")
 
+    if not evaluate_test:
+        return FitResult(val_mse=best_val_loss)
+
     model.eval()
     with torch.no_grad():
         test_pred = model(X_test_t)
         test_loss = criterion(test_pred, y_test_t)
 
-    print("\nTest MSE:", f"{test_loss.item():.4e}")
+    print("\nTest MSE:", f"{test_loss.item():.8e}")
 
     baseline_pred = np.full_like(y_test, fill_value=np.mean(y_train), dtype=float)
 
     nn_sq_errors = (y_test.flatten() - test_pred.numpy().flatten()) ** 2
     baseline_sq_errors = (y_test.flatten() - baseline_pred.flatten()) ** 2
+
+    baseline_mse: float = float(np.mean(baseline_sq_errors))
+    print(f"Baseline MSE: {baseline_mse:.8e}")
 
     error_diffs = baseline_sq_errors - nn_sq_errors
     mean_diff = np.mean(error_diffs)
@@ -309,108 +344,157 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
 
     cohens_d: float = mean_diff / sd_diff if sd_diff > 0 else np.inf
 
-    # print(f"Cohen's d (paired): {cohens_d:.4f}")
+    print(f"Cohen's d (paired): {cohens_d:.4f}")
 
-    return test_loss.item()
+    return FitResult(val_mse=best_val_loss, test_mse=test_loss.item(), cohens_d=cohens_d, baseline_mse=baseline_mse)
 
 
 # Make sure our predicting factor is not part of the feature space
 TARGET = "ii"
 
+# Split proportions used for every fit, so the split (and therefore the baseline) never changes
+PROP_TRAIN, PROP_TEST, PROP_VAL = 0.4, 0.3, 0.3
+
+
+def drop_constant_features(feature_names: list[str]) -> tuple[list[str], list[str]]:
+    """
+    Splits feature_names into (varying, constant). A constant feature (e.g. num_nodes when every
+    system has the same number of nodes) is standardized to all zeros, so it carries no information
+    and its removal would only change the network's width and random initialization, not its
+    function. Removing these before selection stops backward selection from chasing that noise.
+    """
+    varying, constant = [], []
+    for name in feature_names:
+        values = np.array([_get(row, name) for row in rows], dtype=np.float64)
+        if np.ptp(values) == 0:
+            constant.append(name)
+        else:
+            varying.append(name)
+    return varying, constant
+
+
 # Need to hardcode for now, but max_mi has been removed from the database so next dataset generation
 # will eliminate max_mi from the feature space
-all_feature_names = [k for k in rows[0]["features"].keys() if k != TARGET and k != "max_mi"]
+candidate_feature_names = [k for k in rows[0]["features"].keys() if k != TARGET and k != "max_mi"]
+all_feature_names, constant_features = drop_constant_features(candidate_feature_names)
 close_db()
 
+print(f"Dropped {len(constant_features)} constant feature(s) before selection: {constant_features}")
+
 # The best performing model was Model 7. The goal is to determine which features are the most
-# important. Let's start w  ith backward selection (test full model then remove features one by one
-# and measure the impact on MSE).
+# important. Let's start with backward selection (test full model then remove features one by one
+# and measure the impact on validation MSE).
 
 
-mse_full = 0
+def _sd(values: np.ndarray) -> float:
+    return float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
 
 
-def backward_selection(features: list[str]):
-    global mse_full
-    prop_train = 0.4
-    prop_test = 0.3
-    prop_val = 0.3
-
-    # Start by assuming the full model is most optimal
-    optimal_features = features
-    model_can_improve = True
-
-    current_idx = 0
-
-    print(f"There are {len(features)} features in the full model. Beginning backwards selection...")
-    print(f"Features: {features}")
-
-    while model_can_improve:
-
-        # Train on the current optimal model
-        X, y = define_features(features, target=TARGET)
-        mse_optimal_model = fit_FNN(X, y, prop_train, prop_test, prop_val)
-
-        if current_idx == 0:
-            mse_full = mse_optimal_model
-
-        # In the update loop, unless the model decreases MSE by removing a feature,
-        # the model does not improve
-        model_can_improve = False
-        worst_feature: str = ""
-
-        # Iterate through a copy of the features since we are going to remove and re-add features
-        # temporarily until the worst one is found for the given iteration
-
-        print(f"Iteration {current_idx} of backwards selection: \n")
-        for feature in features[:]:
-            #print(f"Temporarily removing feature {feature}...")
-
-            features.remove(feature)
-
-            #print(f"Remaining features: {features}")
-
-            X, y = define_features(features, target=TARGET)
-            mse_reduced_model = fit_FNN(X, y, prop_train, prop_test, prop_val)
-
-            # If removing the feature improved the prediction (i.e; the sub model beat the
-            # previous model's MSE), update the new best MSE val and store the corresponding features
-            if mse_reduced_model < mse_optimal_model:
-                #print(f"Removing feature {feature} improved MSE by {mse_optimal_model - mse_reduced_model}")
-                #print(f"Temporarily recovering feature...\n")
-                mse_optimal_model = mse_reduced_model
-                model_can_improve = True
-                optimal_features = features
-                print(optimal_features)
-                worst_feature = feature
-
-            #else:
-                #print(f"Removing feature {feature} imposed error. Recovering feature...\n")
-
-            features.append(feature)
-
-        if model_can_improve:
-            print(f"New best features for iteration {current_idx}: {optimal_features}")
-            features.remove(worst_feature)
-            print(f"Feature {worst_feature} is permanently removed from the model.")
-            print(f"There are {len(features)} features in the new model. Moving to next index...\n")
-            current_idx += 1
-
-        else:
-            print(f"No more features could be removed. Optimal features recovered.")
-            return optimal_features
+def validation_scores(features: list[str]) -> np.ndarray:
+    """Validation MSE of a model on `features`, one entry per torch seed. Never touches the test set."""
+    X, y = define_features(features, target=TARGET)
+    return np.array([
+        fit_FNN(X, y, PROP_TRAIN, PROP_TEST, PROP_VAL, seed=s).val_mse for s in TORCH_SEEDS
+    ])
 
 
-# Look at the effects of feature selection via backwards selection on the FFNN
-features_sub = backward_selection(all_feature_names)
+def backward_selection(features: list[str]) -> list[str]:
+    # Work on a copy so the caller's list is never mutated
+    current = list(features)
 
-# Let's compare the reduced model from backselection to the full model
+    print(f"There are {len(current)} features in the full model. Beginning backwards selection...")
+    print(f"Features: {current}")
+    print(f"Each model is trained with {N_SEEDS} seeds and compared on mean validation MSE.\n")
 
-X_sub, y_sub = define_features(features_sub, target=TARGET)
-mse_sub = fit_FNN(X_sub, y_sub)
+    current_scores = validation_scores(current)
+    iteration = 0
 
-print(f"Full model MSE value: {mse_full:.4f}")
-print(f"Reduced model MSE value: {mse_sub:.4f}")
+    while len(current) > 1:
+        current_mean = float(current_scores.mean())
+        current_se = _sd(current_scores) / np.sqrt(len(current_scores))
+
+        # A removal is only accepted if it beats the current mean by more than SE_MARGIN standard
+        # errors of the current model's seed-to-seed spread
+        threshold = current_mean - SE_MARGIN * current_se
+
+        print(f"Iteration {iteration} of backwards selection ({len(current)} features):")
+        print(f"Current mean validation MSE: {current_mean:.8e} (SE {current_se:.8e}). "
+              f"A removal must reach below {threshold:.8e}.\n")
+
+        best_feature = None
+        best_scores = None
+        best_mean = threshold
+
+        for feature in current:
+            candidate = [f for f in current if f != feature]
+            scores = validation_scores(candidate)
+            mean = float(scores.mean())
+
+            print(f"Without {feature}: mean validation MSE {mean:.8e}")
+
+            # The removal with the lowest mean validation MSE among those beating the threshold wins
+            if mean < best_mean:
+                best_mean = mean
+                best_feature = feature
+                best_scores = scores
+
+        if best_feature is None:
+            print("\nNo removal beat the threshold. Optimal features recovered.")
+            break
+
+        print(f"\nFeature {best_feature} is permanently removed (mean validation MSE {best_mean:.8e}).")
+        current.remove(best_feature)
+
+        # The accepted candidate was already trained on every seed, so reuse its scores
+        current_scores = best_scores
+        iteration += 1
+        print(f"There are {len(current)} features in the new model. Moving to next index...\n")
+
+    return current
+
+
+def evaluate_on_test(features: list[str]) -> list[FitResult]:
+    """One-off final evaluation on the test set, one FitResult per torch seed."""
+    X, y = define_features(features, target=TARGET)
+    return [
+        fit_FNN(X, y, PROP_TRAIN, PROP_TEST, PROP_VAL, seed=s, evaluate_test=True) for s in TORCH_SEEDS
+    ]
+
+
+def report(label: str, results: list[FitResult]) -> None:
+    mse = np.array([r.test_mse for r in results])
+    d = np.array([r.cohens_d for r in results])
+    print(f"{label} MSE value: {mse.mean():.8e} (SD across seeds {_sd(mse):.8e})")
+    print(f"{label} Cohen's d value: {d.mean():.8f} (SD across seeds {_sd(d):.8f})")
+
+
+# The full model is every non-constant feature. backward_selection works on a copy of it.
+full_features = list(all_feature_names)
+features_sub = backward_selection(full_features)
+removed_features = [f for f in full_features if f not in features_sub]
+
+# Only now is the test set used, once per model and seed
+print("\nSelection complete. Evaluating the full and reduced models on the test set...\n")
+full_results = evaluate_on_test(full_features)
+
+if features_sub == full_features:
+    print("\nNo features were removed, so the reduced model is identical to the full model.")
+    sub_results = full_results
+else:
+    sub_results = evaluate_on_test(features_sub)
+
+# The split and target are fixed, so the baseline must be identical for every model and seed
+baseline_mse = full_results[0].baseline_mse
+assert all(np.isclose(r.baseline_mse, baseline_mse) for r in full_results + sub_results)
+
+print(f"\nTest results, averaged over {N_SEEDS} seeds:")
+print(f"Baseline MSE (predict train mean): {baseline_mse:.8e}")
+report(f"Full model ({len(full_features)} features)", full_results)
+report(f"Reduced model ({len(features_sub)} features)", sub_results)
+
+print(f"\nConstant features dropped before selection ({len(constant_features)}): {constant_features}")
+print(f"Remaining features after backward selection ({len(features_sub)}): {features_sub}")
+print(f"Removed features ({len(removed_features)}): {removed_features}")
 
 end_total = time.perf_counter()
 print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
@@ -419,5 +503,7 @@ print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
 # Full model: 0.5048
 # Sub model: 0.5096
 
-# Optimal features:
-# ['mi', 'wr', 'weight_cluster_coeff', 'short_path_len', 'cheeger_coeff', 'max_scc', 'avg_closeness', 'max_pr']
+# Earlier runs selected features on test MSE from a single training run. That criterion is noisy and
+# optimistically biased, so these results are for reference only and should not be relied upon:
+# Unseeded run: ['mi', 'wr', 'weight_cluster_coeff', 'short_path_len', 'cheeger_coeff', 'max_scc', 'avg_closeness', 'max_pr']
+# Seeded run: only 'diam' was removed (17 of 18 features remained, including the constant num_nodes)
