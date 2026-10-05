@@ -24,17 +24,20 @@ N_SEEDS: int = 5
 TORCH_SEEDS: list[int] = [test_seed + k for k in range(N_SEEDS)]
 
 # During backward selection, a feature is only removed if doing so lowers the mean validation MSE
-# by more than SE_MARGIN standard errors of the current model's seed-to-seed spread.
-# Set to 0 to accept any improvement in the mean validation MSE.
-SE_MARGIN: float = 1.0
+# by more than the SE_MARGINs of standard deviation.
+SE_MARGIN: float = 0.5
 
 
 class FitResult(NamedTuple):
-    """Outputs of one training run. Test-set fields are None unless evaluate_test=True."""
     val_mse: float
     test_mse: Optional[float] = None
     cohens_d: Optional[float] = None
     baseline_mse: Optional[float] = None
+    model: Optional[nn.Module] = None
+    scaler: Optional[StandardScaler] = None
+    train_mean: Optional[float] = None
+    r2: Optional[float] = None
+
 
 start_total = time.perf_counter()
 
@@ -173,7 +176,14 @@ def flatten_predictors(row_slice):
 # COMMENT if the dataset already exists. UNCOMMENT if we need to generate a new dataset
 #gen_and_write_to_db(n=6, num_tpms=20_000, rewrite_db=True)
 
-rows = get_all_rows()
+# 20,000 node system is already stored. Add 100 8 node systems to test scalability
+#gen_and_write_to_db(n=8, num_tpms=100, rewrite_db=False)
+
+# Split 6 node and 8 node systems. The neural network downstream trains only on the 6 node systems
+all_rows = get_all_rows()
+rows = [r for r in all_rows if r["features"]["num_nodes"] == 6]
+rows_8 = [r for r in all_rows if r["features"]["num_nodes"] == 8]
+print(f"{len(rows)} six-node systems, {len(rows_8)} eight-node systems")
 
 
 def _get(row: dict, name: str):
@@ -182,10 +192,11 @@ def _get(row: dict, name: str):
     return row["features"][name]
 
 
-def define_features(feature_names: list[str], target="ii"):
-    y = np.array([_get(row, target) for row in rows], dtype=np.float32)
+def define_features(feature_names: list[str], target="ii", source=None):
+    source = rows if source is None else source
+    y = np.array([_get(row, target) for row in source], dtype=np.float32)
     X = np.array(
-        [flatten_predictors([_get(row, name) for name in feature_names]) for row in rows],
+        [flatten_predictors([_get(row, name) for name in feature_names]) for row in source],
         dtype=np.float32,
     )
     return X, y
@@ -338,6 +349,10 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
     baseline_mse: float = float(np.mean(baseline_sq_errors))
     print(f"Baseline MSE: {baseline_mse:.8e}")
 
+    y_test_flat = y_test.flatten().astype(np.float64)
+    r2: float = float(1 - nn_sq_errors.sum() / ((y_test_flat - y_test_flat.mean()) ** 2).sum())
+    print(f"Test R^2 (vs test mean): {r2:.6f}")
+
     error_diffs = baseline_sq_errors - nn_sq_errors
     mean_diff = np.mean(error_diffs)
     sd_diff = np.std(error_diffs, ddof=1)
@@ -346,7 +361,9 @@ def fit_FNN(X, y, prop_train: float = 0.4, prop_test: float = 0.3, prop_val: flo
 
     print(f"Cohen's d (paired): {cohens_d:.4f}")
 
-    return FitResult(val_mse=best_val_loss, test_mse=test_loss.item(), cohens_d=cohens_d, baseline_mse=baseline_mse)
+    return FitResult(val_mse=best_val_loss, test_mse=test_loss.item(), cohens_d=cohens_d,
+                     baseline_mse=baseline_mse, model=model, scaler=scaler,
+                     train_mean=float(np.mean(y_train)), r2=r2)
 
 
 # Make sure our predicting factor is not part of the feature space
@@ -464,8 +481,12 @@ def evaluate_on_test(features: list[str]) -> list[FitResult]:
 def report(label: str, results: list[FitResult]) -> None:
     mse = np.array([r.test_mse for r in results])
     d = np.array([r.cohens_d for r in results])
+    r2 = np.array([r.r2 for r in results])
+    r2_base = np.array([1 - r.test_mse / r.baseline_mse for r in results])
     print(f"{label} MSE value: {mse.mean():.8e} (SD across seeds {_sd(mse):.8e})")
     print(f"{label} Cohen's d value: {d.mean():.8f} (SD across seeds {_sd(d):.8f})")
+    print(f"{label} R^2 vs test mean: {r2.mean():.6f} (SD across seeds {_sd(r2):.6f})")
+    print(f"{label} R^2 vs train mean: {r2_base.mean():.6f} (SD across seeds {_sd(r2_base):.6f})")
 
 
 # The full model is every non-constant feature. backward_selection works on a copy of it.
@@ -496,14 +517,49 @@ print(f"\nConstant features dropped before selection ({len(constant_features)}):
 print(f"Remaining features after backward selection ({len(features_sub)}): {features_sub}")
 print(f"Removed features ({len(removed_features)}): {removed_features}")
 
+
+def evaluate_transfer(label: str, features: list[str], results: list[FitResult], source_rows: list[dict]) -> None:
+    """Feed out-of-distribution systems into already-trained models (one per torch seed).
+    The baseline is the mean ii of the evaluated systems themselves. It uses no 6-node quantity."""
+    X_new, y_new = define_features(features, target=TARGET, source=source_rows)
+    y_flat = y_new.flatten().astype(np.float64)
+
+    # Baseline: mean ii of the 8-node systems. Independent of the trained models and of every seed.
+    base_sq = (y_flat - y_flat.mean()) ** 2
+    baseline_mse = base_sq.mean()
+
+    mses, ds, r2s = [], [], []
+    for r in results:
+        X_t = torch.tensor(r.scaler.transform(X_new), dtype=torch.float32)  # the scaler the network was trained with
+        r.model.eval()
+        with torch.no_grad():
+            pred = r.model(X_t).numpy().flatten()
+
+        nn_sq = (y_flat - pred) ** 2
+        diff = base_sq - nn_sq
+        sd = np.std(diff, ddof=1)
+
+        mses.append(nn_sq.mean())
+        ds.append(diff.mean() / sd if sd > 0 else np.inf)
+        r2s.append(1 - nn_sq.mean() / baseline_mse)
+
+    mses, ds, r2s = map(np.array, (mses, ds, r2s))
+    print(f"{label} | 8-node baseline MSE (8-node mean): {baseline_mse:.8e}")
+    print(f"{label} | 8-node MSE: {mses.mean():.8e} (SD across seeds {_sd(mses):.8e})")
+    print(f"{label} | 8-node Cohen's d: {ds.mean():.8f} (SD across seeds {_sd(ds):.8f})")
+    print(f"{label} | 8-node R^2 vs 8-node mean: {r2s.mean():.6f} (SD across seeds {_sd(r2s):.6f})")
+
+
+print(f"\nTransfer to {len(rows_8)} eight-node systems (6-node-trained models, 6-node scaler and baseline):")
+evaluate_transfer(f"Full model ({len(full_features)} features)", full_features, full_results, rows_8)
+if features_sub == full_features:
+    print("Reduced model identical to full model.")
+else:
+    evaluate_transfer(f"Reduced model ({len(features_sub)} features)", features_sub, sub_results, rows_8)
+
+
+
 end_total = time.perf_counter()
 print(f"\nTotal runtime: {end_total - start_total:.4f} seconds")
 
-# Prior run under the old Cohen's d criterion (now replaced) for reference only:
-# Full model: 0.5048
-# Sub model: 0.5096
 
-# Earlier runs selected features on test MSE from a single training run. That criterion is noisy and
-# optimistically biased, so these results are for reference only and should not be relied upon:
-# Unseeded run: ['mi', 'wr', 'weight_cluster_coeff', 'short_path_len', 'cheeger_coeff', 'max_scc', 'avg_closeness', 'max_pr']
-# Seeded run: only 'diam' was removed (17 of 18 features remained, including the constant num_nodes)
