@@ -61,7 +61,7 @@ def write_to_db(network_properties) -> None:
         cur.executemany(
             '''
             INSERT INTO network_property (tpm, tpm_prior, features)
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?)
             ''',
             rows
         )
@@ -85,6 +85,21 @@ def get_row_by_idx(idx: int) -> dict | None:
         row = res.fetchone()
 
     return _row_to_dict(row) if row is not None else None
+
+
+# Retrieve data based on the number of nodes. Requires json_extract since it is a part of the 'features'
+# column
+def get_row_by_num_nodes(num_nodes: int) -> list[dict]:
+    with con:
+        res = cur.execute(
+            '''
+            SELECT tpm, tpm_prior, features FROM network_property 
+            WHERE json_extract(features, '$.num_nodes') = ?
+            ''',
+            [num_nodes]
+        )
+        rows = res.fetchall()
+        return [_row_to_dict(row) for row in rows]
 
 
 def get_all_rows() -> list[dict]:
