@@ -20,11 +20,20 @@ def create_db() -> None:
     cur.execute('''
         CREATE TABLE IF NOT EXISTS network_property(
                idx INTEGER PRIMARY KEY AUTOINCREMENT,
-               tpm TEXT,
                tpm_prior TEXT,
                features TEXT
         )
     ''')
+
+
+def drop_tpm_column() -> None:
+    columns = [r["name"] for r in cur.execute("PRAGMA table_info(network_property)")]
+    if "tpm" not in columns:
+        return
+    cur.execute("ALTER TABLE network_property DROP COLUMN tpm")
+    con.commit()
+    cur.execute("VACUUM")
+    print("Dropped legacy 'tpm' column from network_property.")
 
 
 def close_db() -> None:
@@ -53,15 +62,14 @@ def write_to_db(network_properties) -> None:
     rows = []
     for prop in network_properties:
         rows.append((
-            json.dumps(prop["tpm"].tolist()),
             json.dumps(prop["tpm_prior"].tolist()),
-            json.dumps(_cast_to_float(prop["features"])),   # <-- cast here
+            json.dumps(_cast_to_float(prop["features"])),
         ))
     with con:
         cur.executemany(
             '''
-            INSERT INTO network_property (tpm, tpm_prior, features)
-            VALUES (?, ?, ?)
+            INSERT INTO network_property (tpm_prior, features)
+            VALUES (?, ?)
             ''',
             rows
         )
@@ -70,7 +78,6 @@ def write_to_db(network_properties) -> None:
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     return {
-        "tpm": deserialize_array(row["tpm"]),
         "tpm_prior": deserialize_array(row["tpm_prior"]),
         "features": json.loads(row["features"]),
     }
@@ -79,7 +86,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 def get_row_by_idx(idx: int) -> dict | None:
     with con:
         res = cur.execute(
-            'SELECT tpm, tpm_prior, features FROM network_property WHERE idx = ?',
+            'SELECT tpm_prior, features FROM network_property WHERE idx = ?',
             [idx]
         )
         row = res.fetchone()
@@ -93,7 +100,7 @@ def get_row_by_num_nodes(num_nodes: int) -> list[dict]:
     with con:
         res = cur.execute(
             '''
-            SELECT tpm, tpm_prior, features FROM network_property 
+            SELECT tpm_prior, features FROM network_property 
             WHERE json_extract(features, '$.num_nodes') = ?
             ''',
             [num_nodes]
@@ -104,7 +111,21 @@ def get_row_by_num_nodes(num_nodes: int) -> list[dict]:
 
 def get_all_rows() -> list[dict]:
     with con:
-        res = cur.execute('SELECT tpm, tpm_prior, features FROM network_property')
+        res = cur.execute('SELECT tpm_prior, features FROM network_property')
         rows = res.fetchall()
 
     return [_row_to_dict(row) for row in rows]
+
+
+def get_count_systems_generated(num_nodes: int) -> dict | None:
+    with con:
+        res = cur.execute(
+            '''
+            SELECT COUNT(*) AS count
+            FROM network_property 
+            WHERE json_extract(features, '$.num_nodes') = ?
+            ''',
+            [num_nodes]
+        )
+        row = res.fetchone()
+        return {"count": row['count']}
